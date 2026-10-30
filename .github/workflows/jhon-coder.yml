@@ -12,7 +12,6 @@ permissions:
   contents: write
   issues: read
   pull-requests: write
-  models: read
 concurrency:
   group: jhon-agent-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
   cancel-in-progress: false
@@ -28,7 +27,9 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       JHON_ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
-      JHON_MODEL: openai/gpt-4o-mini
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      JHON_MODEL: gemini-3.8-flash
     steps:
       - uses: actions/checkout@v4
         with:

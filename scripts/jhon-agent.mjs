@@ -40,21 +40,48 @@ Respeite história: Vaelorian elegante e humanoide; Oitavo Eco NÃO é elemento,
 NÃO altere scripts do Jhon, documentação fora da pasta do jogo, GitHub Actions nem arquivos secretos.
 Retorne SOMENTE um objeto JSON com campos "summary" string e "files" array de 1 a 3 objetos contendo "path" e "content". Arquivos UTF-8 completos, e apenas .gd ou .tscn sob games/aetheria/. Ao modificar arquivo, devolva seu conteúdo COMPLETO, não diff. Priorize 1 arquivo que entregue funcionalidade real. Não escreva explicações fora do JSON.`;
 const prompt = `Issue #${issueNumber}: ${issue.title}\n\n${String(issue.body||"").slice(0,6500)}\n\nARQUIVOS ATUAIS:\n${context.slice(0,18000)}\n\nFaça uma alteração concreta de jogo compatível com o código existente. Não finja que testou em Android.`;
-const model = process.env.JHON_MODEL || "openai/gpt-4o-mini";
+// GitHub Models terminou em julho de 2026. Usar secret de provedor ativo.
 async function generate() {
-  const res = await fetch("https://models.github.ai/inference/chat/completions",{
-    method:"POST",
-    headers: { Authorization:`Bearer ${TOKEN}`, "Content-Type":"application/json", Accept:"application/json"},
-    body:JSON.stringify({model,messages:[{role:"system",content:system},{role:"user",content:prompt}],temperature:0.2,max_tokens:3500})
-  });
-  const raw = await res.text();
-  if (!res.ok) throw Error(`GitHub Models falhou (HTTP ${res.status}): ${raw.slice(0,400)}. Verifique cota e permissão models:read.`);
-  const parsed = JSON.parse(raw);
-  let output = String(parsed.choices?.[0]?.message?.content || "").trim();
-  if (output.startsWith("```")) output=output.replace(/^```(?:json)?\s*/,"").replace(/\s*```$/,"");
-  let obj;
-  try {obj=JSON.parse(output);} catch(e){throw Error(`Resposta da IA não é JSON válido: ${output.slice(0,350)}`);}
-  return obj;
+  let output = "";
+  if (process.env.GEMINI_API_KEY) {
+    const model = process.env.JHON_MODEL || "gemini-3.8-flash";
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+      method: "POST",
+      headers: { "x-goog-api-key": process.env.GEMINI_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 5500, responseMimeType: "application/json" }
+      })
+    });
+    const raw = await res.text();
+    if (!res.ok) throw Error("Gemini HTTP " + res.status + ": " + raw.slice(0, 380));
+    let data;
+    try { data = JSON.parse(raw); } catch { throw Error("O Gemini não retornou JSON de API válido."); }
+    output = (data.candidates?.[0]?.content?.parts || []).map(part => part.text || "").join("").trim();
+    if (!output) throw Error("O Gemini retornou resposta vazia ou bloqueada.");
+  } else if (process.env.OPENAI_API_KEY) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + process.env.OPENAI_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.JHON_OPENAI_MODEL || "gpt-4.1-mini",
+        messages: [{role: "system", content: system}, {role: "user", content: prompt}],
+        temperature: 0.2, max_completion_tokens: 5500,
+        response_format: { type: "json_object" }
+      })
+    });
+    const raw = await res.text();
+    if (!res.ok) throw Error("OpenAI API HTTP " + res.status + ": " + raw.slice(0, 380));
+    let data;
+    try { data = JSON.parse(raw); } catch { throw Error("OpenAI não retornou JSON de API válido."); }
+    output = String(data.choices?.[0]?.message?.content || "").trim();
+  } else {
+    throw Error("JHON: falta uma chave de IA. Adicione GEMINI_API_KEY em https://github.com/sryck352-netizen/Jhon-/settings/secrets/actions ou OPENAI_API_KEY. Não coloque chaves em Issues ou no código.");
+  }
+  if (output.charCodeAt(0) === 96) output = output.replace(/^\x60{3}(?:json)?\s*/, "").replace(/\s*\x60{3}$/, "");
+  try { return JSON.parse(output); }
+  catch { throw Error("Resposta do modelo não foi um objeto JSON adequado: " + output.slice(0, 200)); }
 }
 const result = await generate();
 if (!result || !Array.isArray(result.files) || result.files.length<1 || result.files.length>3) throw Error("IA não entregou entre 1 e 3 arquivos.");

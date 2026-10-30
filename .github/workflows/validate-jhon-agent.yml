@@ -1,0 +1,25 @@
+name: JHON | Verificar sintaxe do agente
+on:
+  push:
+    paths:
+      - scripts/jhon-agent.mjs
+      - .github/workflows/jhon-coder.yml
+      - .github/workflows/validate-jhon-agent.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar sintaxe JavaScript do agente
+        run: node --check scripts/jhon-agent.mjs
+      - name: Verificar arquivos do projeto Aetheria
+        run: |
+          test -s games/aetheria/project.godot
+          test -s games/aetheria/scripts/noctis.gd
+          test -s games/aetheria/scripts/world.gd

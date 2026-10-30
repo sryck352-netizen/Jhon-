@@ -1,0 +1,31 @@
+name: Aetheria | Conferir estrutura do projeto Godot
+on:
+  push:
+    branches: [main]
+    paths: ['games/aetheria/**']
+  pull_request:
+    paths: ['games/aetheria/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate-project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verificar estrutura mínima de Godot 4
+        run: |
+          test -s games/aetheria/project.godot
+          test -s games/aetheria/scenes/main.tscn
+          test -s games/aetheria/scripts/world.gd
+          test -s games/aetheria/scripts/noctis.gd
+          echo "Arquivos-base do protótipo 3D presentes."
+      - name: Instalar editor Godot estável
+        run: |
+          curl -fLsS --retry 3 -o godot.zip "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip"
+          unzip -q godot.zip -d /tmp
+          chmod +x /tmp/Godot_v4.7.2-stable_linux.x86_64
+      - name: Validar importação Godot (headless)
+        run: |
+          timeout 120 /tmp/Godot_v4.7.2-stable_linux.x86_64 --headless --path games/aetheria --editor --import --quit

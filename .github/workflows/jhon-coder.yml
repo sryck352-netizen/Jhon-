@@ -1,0 +1,69 @@
+name: JHON | Agente de programação de jogos
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Número da Issue [JHON]"
+        required: true
+        type: number
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+  models: read
+concurrency:
+  group: jhon-agent-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  coding:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.login == 'sryck352-netizen' &&
+      startsWith(github.event.issue.title, '[JHON]') &&
+      (github.event.action == 'opened' || github.event.label.name == 'jhon-auto'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      JHON_ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+      JHON_MODEL: openai/gpt-4o-mini
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gerar código via GitHub Models
+        run: node scripts/jhon-agent.mjs
+      - name: Criar branch com a alteração
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="jhon/issue-${JHON_ISSUE_NUMBER}-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add games/aetheria
+          if git diff --cached --quiet; then
+            echo "IA não alterou nenhum arquivo."
+            exit 1
+          fi
+          git commit -m "JHON: criar parte do jogo Aetheria (issue #${JHON_ISSUE_NUMBER})"
+          git push origin HEAD:"$BRANCH"
+          {
+            echo "## JHON: código produzido"
+            echo "Resumo: $(cat jhon-summary.txt)"
+            echo "Branch: \`$BRANCH\`"
+            echo "O código **não foi testado em aparelho físico** e deve ser revisado."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if gh pr create --base main --head "$BRANCH" --title "JHON | Aetheria P01 | Issue #${JHON_ISSUE_NUMBER}" --body "Proposta gerada por GitHub Models para #${JHON_ISSUE_NUMBER}. Revisar código e executar teste Godot antes de integrar. Não é um APK nem arte final." ; then
+            echo "Pull Request criado."
+          else
+            echo "::warning::GitHub não permitiu criar PR via Actions. Branch foi publicada: $BRANCH"
+            echo "Revisar em https://github.com/${GITHUB_REPOSITORY}/compare/main...$BRANCH" >> "$GITHUB_STEP_SUMMARY"
+          fi

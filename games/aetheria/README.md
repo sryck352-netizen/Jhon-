@@ -7,3 +7,5 @@ O objetivo do marco P01 é confirmar importação, movimento, câmera, colisão 
 Para rodar: abra `project.godot` no Godot 4.7.2 e pressione Executar. Verifique saída/erros. Para testar no Galaxy A15 é preciso exportação Android e validação em aparelho físico.
 
 **Referência do projeto:** https://github.com/sryck352-netizen/Jhon-/issues/1
+
+Status de automação: em diagnóstico; nenhuma correção é considerada validada antes de executar o workflow.

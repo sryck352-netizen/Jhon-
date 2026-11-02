@@ -1,0 +1,53 @@
+name: Merlin Android - compilar e publicar APK
+
+on:
+  push:
+    branches: [merlin]
+    paths:
+      - 'Merlin/**'
+      - '.github/workflows/merlin-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-merlin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: SDK Android 35
+        run: |
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compilar aplicativo
+        run: gradle -p Merlin --no-daemon assembleDebug
+      - name: Preparar arquivo
+        run: cp Merlin/app/build/outputs/apk/debug/app-debug.apk Merlin.apk
+      - name: Arquivar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Merlin-Android-APK
+          path: Merlin.apk
+      - name: Publicar link direto para Chrome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG=merlin-v1.1.0
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Merlin.apk --clobber
+          else
+            gh release create "$TAG" Merlin.apk --title "Merlin 1.1 - Player Android" --notes "Player offline com layout musical, playlists, favoritos, mini-player e importacao das musicas baixadas do Snaptube."
+          fi

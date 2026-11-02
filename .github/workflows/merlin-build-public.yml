@@ -1,0 +1,45 @@
+name: Merlin 1.1 - APK publico
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/merlin-build-public.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: merlin
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Instalar SDK Android
+        run: |
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compilar Merlin
+        run: gradle -p Merlin --no-daemon assembleDebug
+      - name: Publicar APK para download direto
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp Merlin/app/build/outputs/apk/debug/app-debug.apk Merlin.apk
+          TAG=merlin-v1.1.1
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Merlin.apk --clobber
+          else
+            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.1 - tocador musical" --notes "Merlin: player Android offline com playlists, busca, capas, recentes e importacao de musicas."
+          fi

@@ -45,6 +45,14 @@ public class AudioLibrary {
                 if (track.uri.length() > 0 && seen.add(track.uri)) tracks.add(track);
             }
         } catch (Exception ignored) { }
+        // Faixas reproduzidas no Audius ficam disponíveis na biblioteca, sem arquivos pirateados.
+        try{
+            JSONArray online=new JSONArray(ctx.getSharedPreferences(PREFS,0).getString("online_library","[]"));
+            for(int i=0;i<online.length();i++){
+                Track remote=Track.fromJson(online.getJSONObject(i));
+                if(AudiusCatalog.canPlay(remote)&&seen.add(remote.uri))tracks.add(remote);
+            }
+        }catch(Exception ignored){}
         tracks.sort(Comparator.comparing(t -> t.title.toLowerCase(java.util.Locale.getDefault())));
         return tracks;
     }
@@ -180,6 +188,20 @@ public class AudioLibrary {
             obj.remove(name);
             return prefs.edit().putString("playlists",obj.toString()).commit();
         }catch(Exception ignored){return false;}
+    }
+
+    public static synchronized void rememberOnline(Context ctx,Track track){
+        if(!AudiusCatalog.canPlay(track))return;
+        SharedPreferences p=ctx.getSharedPreferences(PREFS,0);
+        try{
+            JSONArray prev=new JSONArray(p.getString("online_library","[]"));
+            JSONArray next=new JSONArray();next.put(track.toJson());
+            for(int i=0;i<prev.length()&&next.length()<200;i++){
+                JSONObject item=prev.getJSONObject(i);
+                if(!track.uri.equals(item.optString("uri")))next.put(item);
+            }
+            p.edit().putString("online_library",next.toString()).apply();
+        }catch(Exception ignored){}
     }
 
 }

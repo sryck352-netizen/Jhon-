@@ -8,13 +8,19 @@ public class Track {
     public final String artist;
     public final String album;
     public final long duration;
+    public final String artwork;
 
     public Track(String uri, String title, String artist, String album, long duration) {
+        this(uri,title,artist,album,duration,"");
+    }
+
+    public Track(String uri, String title, String artist, String album, long duration, String artwork) {
         this.uri = uri;
         this.title = title == null || title.trim().isEmpty() ? "Faixa desconhecida" : title;
         this.artist = artist == null || artist.trim().isEmpty() || artist.equals("<unknown>") ? "Artista desconhecido" : artist;
         this.album = album == null ? "" : album;
         this.duration = Math.max(0, duration);
+        this.artwork = artwork == null ? "" : artwork;
     }
 
     public JSONObject toJson() {
@@ -25,11 +31,12 @@ public class Track {
             o.put("artist", artist);
             o.put("album", album);
             o.put("duration", duration);
+            o.put("artwork", artwork);
         } catch (Exception ignored) { }
         return o;
     }
 
     public static Track fromJson(JSONObject o) {
-        return new Track(o.optString("uri"), o.optString("title"), o.optString("artist"), o.optString("album"), o.optLong("duration"));
+        return new Track(o.optString("uri"), o.optString("title"), o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("artwork",""));
     }
 }

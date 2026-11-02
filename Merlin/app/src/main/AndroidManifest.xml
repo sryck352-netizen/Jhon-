@@ -11,7 +11,7 @@
         android:icon="@drawable/merlin_icon"
         android:roundIcon="@drawable/merlin_icon"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:theme="@style/MerlinTheme"
         android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

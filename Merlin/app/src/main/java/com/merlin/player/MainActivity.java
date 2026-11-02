@@ -72,6 +72,8 @@ public class MainActivity extends Activity {
     private int currentScreen = 0; // 0 início, 1 busca, 2 biblioteca
     private final LruCache<String,Bitmap> artCache = new LruCache<>(80);
     private TextView countText, miniTitle, miniArtist, miniPlay, miniArt;
+    private FrameLayout miniCover;
+    private String miniCoverUri="";
     private SeekBar miniSeek;
     private String search = "", filter = "Todas";
     private Dialog playerDialog;
@@ -441,12 +443,19 @@ public class MainActivity extends Activity {
 
     private void buildMini(LinearLayout root) {
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setBackground(round(0xFF542137,9));
+        GradientDrawable miniGradient=new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{0xFF56306B,0xFF332145,0xFF241B32});
+        miniGradient.setCornerRadius(dp(12));
+        wrap.setBackground(miniGradient);
         LinearLayout.LayoutParams wl=lp(-1,-2);wl.setMargins(dp(10),dp(5),dp(10),dp(10));
         LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(10),dp(8),dp(8),dp(5));
         miniArt=text("♫",26,TEXT,true);miniArt.setGravity(Gravity.CENTER);miniArt.setBackground(round(0xFF75405B,5));
-        bar.addView(miniArt,lp(47,47));
+        miniCover=new FrameLayout(this);
+        miniCover.setClipToOutline(true);
+        miniCover.addView(miniArt,new FrameLayout.LayoutParams(-1,-1));
+        bar.addView(miniCover,lp(47,47));
         LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);
         names.setPadding(dp(12),0,dp(4),0);
         miniTitle=text("Nada tocando",14,TEXT,true);miniTitle.setSingleLine(true);miniTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -454,7 +463,7 @@ public class MainActivity extends Activity {
         names.addView(miniTitle);names.addView(miniArtist);
         bar.addView(names,new LinearLayout.LayoutParams(0,-2,1));
         names.setOnClickListener(v->showPlayer());
-        miniArt.setOnClickListener(v->showPlayer());
+        miniCover.setOnClickListener(v->showPlayer());
         miniPlay=text("▶",25,TEXT,true);miniPlay.setGravity(Gravity.CENTER);
         miniPlay.setOnClickListener(v->command(MusicService.ACTION_TOGGLE));bar.addView(miniPlay,lp(45,48));
         TextView next=text("⏭",23,TEXT,true);next.setGravity(Gravity.CENTER);
@@ -1392,6 +1401,19 @@ public class MainActivity extends Activity {
         boolean active=!MusicService.currentUri.isEmpty();
         miniTitle.setText(active?MusicService.currentTitle:"Nada tocando");
         miniArtist.setText(active?MusicService.currentArtist:"Escolha uma música");
+        if(miniCover!=null && !MusicService.currentUri.equals(miniCoverUri)){
+            miniCoverUri=MusicService.currentUri;
+            miniCover.removeAllViews();
+            Track matching=null;
+            for(Track t:tracks){if(t.uri.equals(miniCoverUri)){matching=t;break;}}
+            if(matching!=null)miniCover.addView(cover(matching,47),
+                new FrameLayout.LayoutParams(-1,-1));
+            else {
+                miniArt=text("♫",25,TEXT,true);miniArt.setGravity(Gravity.CENTER);
+                miniArt.setBackground(round(0xFF6D4386,5));
+                miniCover.addView(miniArt,new FrameLayout.LayoutParams(-1,-1));
+            }
+        }
         miniPlay.setText(MusicService.playing?"❚❚":"▶");
         if(!MusicService.playbackError.isEmpty()&&!MusicService.playbackError.equals(lastShownPlaybackError)){
             lastShownPlaybackError=MusicService.playbackError;

@@ -1,4 +1,4 @@
-name: Merlin 1.4.1 - APK publico
+name: Merlin 1.5.0 - APK publico
 
 on:
   push:
@@ -33,16 +33,21 @@ jobs:
         env:
           MERLIN_FIREBASE_API_KEY: ${{ vars.MERLIN_FIREBASE_API_KEY }}
           MERLIN_FIREBASE_DATABASE_URL: ${{ vars.MERLIN_FIREBASE_DATABASE_URL }}
-        run: gradle -p Merlin --no-daemon assembleDebug
+        run: gradle -p Merlin --no-daemon testDebugUnitTest assembleDebug
+      - name: Verificar APK, assinatura e pacote Android
+        run: |
+          APK=Merlin/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|application-label):"
       - name: Publicar APK para download direto
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           cp Merlin/app/build/outputs/apk/debug/app-debug.apk Merlin.apk
-          TAG=merlin-v1.4.1
+          TAG=merlin-v1.5.0
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" Merlin.apk --clobber
           else
-            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.4 - tocador musical" --notes "Merlin 1.4: playlists pessoais, colaborativas, Match com até 10 amigos, convites e sincronização Firebase quando configurada. Sem variáveis, modo local."
+            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.5.0 - RM neon, Audius, playlists e Match" --notes "Merlin 1.5: player com Audius autorizado, backup biblioteca, icone RM oficial, Firebase realtime e Match consentido. Colaboracao exige configurar Firebase no GitHub Actions. APK debug: assinatura pode diferir das versoes anteriores; backup antes de atualizar."
           fi

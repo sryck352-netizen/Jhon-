@@ -396,12 +396,24 @@ public final class CloudPlaylists {
             Room room=new Room(roomId,getObj("rooms/"+roomId));
             if(!MATCH.equals(room.kind))throw new Exception("Essa playlist não é um Match.");
             List<JSONObject> proposed=recommendations(room,40);
+            Set<String> wanted=new HashSet<>();
+            for(JSONObject song:proposed)wanted.add(song.optString("key"));
+            // Apaga somente sugestões criadas automaticamente e que perderam relevância.
+            java.util.Iterator<String> oldSongs=room.songs.keys();
+            while(oldSongs.hasNext()){
+                String key=oldSongs.next();
+                JSONObject value=room.songs.optJSONObject(key);
+                if(value!=null&&value.optBoolean("autoMatch",false)&&!wanted.contains(key)){
+                    delete("rooms/"+roomId+"/tracks/"+key);
+                }
+            }
             for(JSONObject song:proposed){
                 String key=song.optString("key");
                 if(room.songs.has(key))continue;
                 db("rooms/"+roomId+"/tracks/"+key,"PUT",new JSONObject()
                     .put("title",song.optString("title")).put("artist",song.optString("artist"))
                     .put("album","Match Merlin").put("addedBy",uid)
+                    .put("autoMatch",true)
                     .put("addedAt",System.currentTimeMillis()));
             }
             return proposed.size();

@@ -7,11 +7,20 @@ android {
         applicationId 'com.merlin.player'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '1.2'
+        versionCode 4
+        versionName '1.3'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+
+// Materializa o ícone fornecido pelo usuário diretamente da imagem incorporada ao projeto.
+def merlinIconBase64 = file('../merlin_icon.base64')
+def merlinIconOutput = file('src/main/res/drawable-nodpi/merlin_icon.jpg')
+if (merlinIconBase64.isFile()) {
+    merlinIconOutput.parentFile.mkdirs()
+    merlinIconOutput.bytes = java.util.Base64.getMimeDecoder().decode(merlinIconBase64.text)
 }

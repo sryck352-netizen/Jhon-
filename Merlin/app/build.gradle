@@ -10,8 +10,8 @@ android {
         applicationId 'com.merlin.player'
         minSdk 26
         targetSdk 35
-        versionCode 6
-        versionName '1.4.1'
+        versionCode 7
+        versionName '1.5.0'
         // Configuração pública do Firebase. A build sem as variáveis fica no modo offline.
         def webKey = (System.getenv('MERLIN_FIREBASE_API_KEY') ?: '').replace('\\', '\\\\').replace('"', '\\"')
         def url = (System.getenv('MERLIN_FIREBASE_DATABASE_URL') ?: '').replace('\\', '\\\\').replace('"', '\\"')

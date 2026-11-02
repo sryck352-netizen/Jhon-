@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
     private Runnable roomPoll;
 
     private List<OnlineCatalog.Song> onlineResults = new ArrayList<>();
+    private List<Track> audiusResults = new ArrayList<>();
     private String onlineMessage="Digite pelo menos 2 letras para pesquisar na internet.";
     private boolean onlineLoading=false;
     private long onlineRequest=0;
@@ -271,6 +272,14 @@ public class MainActivity extends Activity {
             if(b!=null)img.setImageBitmap(b);
             else worker.execute(()->{
                 Bitmap cover=null;
+                if(t.artwork.startsWith("https://"))cover=OnlineCatalog.thumbnail(t.artwork);
+                if(cover!=null){
+                    Bitmap result=cover;
+                    artCache.put(t.uri,result);
+                    handler.post(()->{if(t.uri.equals(img.getTag()))img.setImageBitmap(result);});
+                    return;
+                }
+                if(AudiusCatalog.canPlay(t))return;
                 MediaMetadataRetriever retriever=new MediaMetadataRetriever();
                 try{
                     retriever.setDataSource(getApplicationContext(),Uri.parse(t.uri));
@@ -548,17 +557,21 @@ public class MainActivity extends Activity {
             TextView hint=text("Músicas baixadas no seu celular",13,MUTED,false);
             songsContainer.addView(hint);
             showTrackList(songsContainer,visible,50);
-            songsContainer.addView(section("Resultados na internet"));
-            TextView source=text("Catálogo musical público • a reprodução online acontece no serviço de origem",12,MUTED,false);
-            source.setPadding(0,0,0,dp(10));
-            songsContainer.addView(source);
+            songsContainer.addView(section("Ouvir aqui • Audius"));
+            songsContainer.addView(text("Músicas disponíveis para streaming autorizado dentro do Merlin",12,MUTED,false));
             if(onlineLoading){
-                TextView loading=text("Pesquisando músicas e artistas...",13,MUTED,false);
+                TextView loading=text("Buscando músicas na internet...",13,MUTED,false);
                 songsContainer.addView(loading,margins(0,8,0,12,-1,38));
-            }else if(onlineResults.isEmpty()){
-                TextView empty=text(onlineMessage,13,MUTED,false);
-                songsContainer.addView(empty,margins(0,8,0,12,-1,45));
             }else{
+                for(Track t:audiusResults)audiusRow(songsContainer,t);
+                if(audiusResults.isEmpty()){
+                    TextView empty=text(onlineMessage.isEmpty()?"Nenhuma faixa reproduzível encontrada no Audius.":onlineMessage,12,MUTED,false);
+                    songsContainer.addView(empty,margins(0,8,0,9,-1,-2));
+                }
+            }
+            songsContainer.addView(section("Outras músicas • referência"));
+            songsContainer.addView(text("Resultados do iTunes: para ouvir aqui, procure uma versão disponível no Audius ou importe seu arquivo.",12,MUTED,false));
+            if(!onlineLoading){
                 for(OnlineCatalog.Song song:onlineResults)onlineRow(songsContainer,song);
             }
         } else {
@@ -593,11 +606,11 @@ public class MainActivity extends Activity {
         long request=onlineRequest;
         if(pendingSearch!=null)handler.removeCallbacks(pendingSearch);
         if(search.length()<2){
-            onlineLoading=false;onlineResults=new ArrayList<>();
+            onlineLoading=false;onlineResults=new ArrayList<>();audiusResults=new ArrayList<>();
             onlineMessage="Pesquise um título, álbum ou artista.";return;
         }
         if(getSharedPreferences("merlin_settings",0).getBoolean("offline_only",false)){
-            onlineLoading=false;onlineResults=new ArrayList<>();
+            onlineLoading=false;onlineResults=new ArrayList<>();audiusResults=new ArrayList<>();
             onlineMessage="Busca online desativada no modo offline.";return;
         }
         onlineLoading=true;
@@ -605,25 +618,75 @@ public class MainActivity extends Activity {
         pendingSearch=()->{
             onlineWorker.execute(()->{
                 List<OnlineCatalog.Song> received;
-                String message;
+                List<Track> playable;
+                String message="";
+                try{
+                    playable=AudiusCatalog.search(term);
+                }catch(Exception e){
+                    playable=new ArrayList<>();
+                    message="Audius: "+e.getMessage();
+                }
                 try {
                     received=OnlineCatalog.search(term);
-                    message=received.isEmpty()?"Nenhum resultado encontrado.":"";
                 }catch(Exception e){
                     received=new ArrayList<>();
-                    message="Não consegui acessar o catálogo. Verifique sua internet.";
+                    if(message.isEmpty())message="Não foi possível consultar o catálogo online.";
                 }
+                if(received.isEmpty()&&playable.isEmpty()&&message.isEmpty())
+                    message="Nenhum resultado encontrado.";
                 final List<OnlineCatalog.Song> response=received;
+                final List<Track> playableResponse=playable;
                 final String status=message;
                 handler.post(()->{
                     if(request!=onlineRequest || currentScreen!=1)return;
-                    onlineResults=response;onlineMessage=status;
+                    onlineResults=response; audiusResults=playableResponse;onlineMessage=status;
                     onlineLoading=false;renderTracks();
                 });
             });
         };
         handler.postDelayed(pendingSearch,370);
     }
+
+    private void audiusRow(LinearLayout list, Track song){
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(cover(song,55),lp(55,55));
+        LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(12),0,dp(8),0);
+        TextView name=text(song.title,15,TEXT,false);
+        name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        labels.addView(name);
+        TextView subtitle=text(song.artist+" • Audius",12,MUTED,false);
+        subtitle.setSingleLine(true);subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        labels.addView(subtitle);
+        row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        TextView play=text("▶",24,PURPLE,true);play.setGravity(Gravity.CENTER);
+        row.addView(play,lp(40,56));
+        row.setOnClickListener(v->playOnline(song));
+        row.setOnLongClickListener(v->{
+            AudioLibrary.rememberOnline(this,song);
+            AudioLibrary.toggleFavorite(this,song.uri);
+            toast("Faixa salva nos favoritos; toque para reproduzir");
+            loadTracks();return true;
+        });
+        list.addView(row,margins(0,0,0,9,-1,61));
+    }
+    private void playOnline(Track chosen){
+        if(!AudiusCatalog.canPlay(chosen)){toast("Fonte de áudio não autorizada.");return;}
+        ArrayList<Track> queue=new ArrayList<>(audiusResults);
+        if(queue.isEmpty())queue.add(chosen);
+        int selected=-1;
+        for(int i=0;i<queue.size();i++)if(queue.get(i).uri.equals(chosen.uri)){selected=i;break;}
+        if(selected<0){queue.add(0,chosen);selected=0;}
+        AudioLibrary.rememberOnline(this,chosen);
+        remember(chosen);
+        AudioLibrary.saveQueue(this,queue);
+        Intent intent=new Intent(this,MusicService.class).setAction(MusicService.ACTION_PLAY);
+        intent.putExtra("index",selected);
+        if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent);
+        handler.postDelayed(this::updateMini,500);
+        toast("Reproduzindo no Merlin • Audius");
+    }
+
     private void onlineRow(LinearLayout list, OnlineCatalog.Song song){
         LinearLayout row=new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);

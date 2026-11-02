@@ -566,15 +566,15 @@ public class MainActivity extends Activity {
             TextView hint=text("Músicas baixadas no seu celular",13,MUTED,false);
             songsContainer.addView(hint);
             showTrackList(songsContainer,visible,50);
-            songsContainer.addView(section("Ouvir aqui • Audius"));
-            songsContainer.addView(text("Músicas disponíveis para streaming autorizado dentro do Merlin",12,MUTED,false));
+            songsContainer.addView(section("Ouvir no Merlin"));
+            songsContainer.addView(text("Faixas independentes com streaming autorizado • Audius"+(JamendoCatalog.configured()?" e Jamendo":""),12,MUTED,false));
             if(onlineLoading){
                 TextView loading=text("Buscando músicas na internet...",13,MUTED,false);
                 songsContainer.addView(loading,margins(0,8,0,12,-1,38));
             }else{
                 for(Track t:audiusResults)audiusRow(songsContainer,t);
                 if(audiusResults.isEmpty()){
-                    TextView empty=text(onlineMessage.isEmpty()?"Nenhuma faixa reproduzível encontrada no Audius.":onlineMessage,12,MUTED,false);
+                    TextView empty=text(onlineMessage.isEmpty()?"Não há músicas disponíveis nestes catálogos para esta busca.":onlineMessage,12,MUTED,false);
                     songsContainer.addView(empty,margins(0,8,0,9,-1,-2));
                 }
             }
@@ -635,6 +635,13 @@ public class MainActivity extends Activity {
                     playable=new ArrayList<>();
                     message="Audius: "+e.getMessage();
                 }
+                if(JamendoCatalog.configured()){
+                    try {
+                        playable.addAll(JamendoCatalog.search(term));
+                    }catch(Exception e){
+                        message += " Jamendo: "+e.getMessage();
+                    }
+                }
                 try {
                     received=OnlineCatalog.search(term);
                 }catch(Exception e){
@@ -664,7 +671,7 @@ public class MainActivity extends Activity {
         TextView name=text(song.title,15,TEXT,false);
         name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         labels.addView(name);
-        TextView subtitle=text(song.artist+" • Audius",12,MUTED,false);
+        TextView subtitle=text(song.artist+(JamendoCatalog.canPlay(song)?" • Jamendo":" • Audius"),12,MUTED,false);
         subtitle.setSingleLine(true);subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
         labels.addView(subtitle);
         row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
@@ -681,7 +688,7 @@ public class MainActivity extends Activity {
         list.addView(row,margins(0,0,0,9,-1,61));
     }
     private void playOnline(Track chosen){
-        if(!AudiusCatalog.canPlay(chosen)){toast("Fonte de áudio não autorizada.");return;}
+        if(!AudiusCatalog.canPlay(chosen)&&!JamendoCatalog.canPlay(chosen)){toast("Fonte de áudio não autorizada.");return;}
         ArrayList<Track> queue=new ArrayList<>(audiusResults);
         if(queue.isEmpty())queue.add(chosen);
         int selected=-1;
@@ -697,7 +704,7 @@ public class MainActivity extends Activity {
         intent.putExtra("index",selected);
         if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent);
         handler.postDelayed(this::updateMini,500);
-        toast("Reproduzindo no Merlin • Audius");
+        toast("Abrindo áudio no Merlin…");
     }
 
     private void onlineRow(LinearLayout list, OnlineCatalog.Song song){

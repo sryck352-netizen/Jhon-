@@ -46,6 +46,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Iterator;
+import org.json.JSONObject;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URLEncoder;
@@ -55,7 +57,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private final int BG = 0xFF111111;
     private final int SURFACE = 0xFF292929;
-    private final int PURPLE = 0xFF1ED760;
+    private final int PURPLE = 0xFFB47BFF;
     private final int TEXT = 0xFFF9F9F9;
     private final int MUTED = 0xFFAAAAAA;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -71,6 +73,13 @@ public class MainActivity extends Activity {
     private SeekBar miniSeek;
     private String search = "", filter = "Todas";
     private Dialog playerDialog;
+    private CloudPlaylists cloud;
+    private List<CloudPlaylists.Room> cloudRooms = new ArrayList<>();
+    private AlertDialog activeRoomDialog;
+    private LinearLayout activeRoomContent;
+    private String activeRoomId="";
+    private Runnable roomPoll;
+
     private List<OnlineCatalog.Song> onlineResults = new ArrayList<>();
     private String onlineMessage="Digite pelo menos 2 letras para pesquisar na internet.";
     private boolean onlineLoading=false;
@@ -106,8 +115,10 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG);
+        cloud=new CloudPlaylists(this);
         buildUI();
         checkPermission();
+        handler.post(()->handleJoinIntent(getIntent()));
         handler.post(new Runnable(){
             @Override public void run(){updateMini();handler.postDelayed(this,700);}
         });
@@ -118,12 +129,24 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=33) registerReceiver(playbackReceiver,new IntentFilter(MusicService.ACTION_UPDATE),Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(playbackReceiver,new IntentFilter(MusicService.ACTION_UPDATE));
         updateMini();
+        if(cloud!=null&&cloud.configured())loadCloudRooms();
+        if(roomPoll!=null&&activeRoomDialog!=null&&activeRoomDialog.isShowing())handler.postDelayed(roomPoll,1000);
     }
     @Override protected void onStop() {
         try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}
+        if(roomPoll!=null)handler.removeCallbacks(roomPoll);
         super.onStop();
     }
 
+
+    @Override protected void onNewIntent(Intent intent){
+        super.onNewIntent(intent);setIntent(intent);handleJoinIntent(intent);
+    }
+    @Override protected void onDestroy(){
+        if(roomPoll!=null)handler.removeCallbacks(roomPoll);
+        if(cloud!=null)cloud.close();
+        super.onDestroy();
+    }
 
     private void buildUI(){
         LinearLayout root=new LinearLayout(this);
@@ -214,7 +237,7 @@ public class MainActivity extends Activity {
         addNav("⌂","Início",0,()->{currentScreen=0;filter="Todas";search="";renderTracks();});
         addNav("⌕","Buscar",1,()->{currentScreen=1;filter="Todas";renderTracks();searchField.requestFocus();});
         addNav("▥","Biblioteca",2,()->{currentScreen=2;renderTracks();});
-        addNav("+","Criar",-1,()->createPlaylist());
+        addNav("+","Criar",-1,()->openCreateMenu());
     }
     private void addNav(String icon,String name,int page,Runnable click){
         LinearLayout col=new LinearLayout(this);
@@ -319,6 +342,7 @@ public class MainActivity extends Activity {
         item.addView(text("Merlin • Playlist",11,MUTED,false));
         strip.addView(item,margins(0,0,15,0,155,-2));
         item.setOnClickListener(v->click.run());
+        item.setOnLongClickListener(v->{if(AudioLibrary.playlistNames(this).contains(name)){localPlaylistMenu(name);return true;}return false;});
     }
     private void addHorizontalList(LinearLayout parent,ArrayList<String> names){
         HorizontalScrollView sc=new HorizontalScrollView(this);
@@ -412,6 +436,7 @@ public class MainActivity extends Activity {
         for(String name:names){
             TextView b=chip(name,name.equals(filter),()->{filter=name;renderTracks();});
             playlistBar.addView(b,margins(0,0,8,0,-2,38));
+            b.setOnLongClickListener(v->{if(AudioLibrary.playlistNames(this).contains(name)){localPlaylistMenu(name);return true;}return false;});
         }
     }
 
@@ -423,7 +448,9 @@ public class MainActivity extends Activity {
             .setPositiveButton("Criar",(d,w)->{
                 String name=entry.getText().toString().trim();
                 if(name.isEmpty() || name.equals("Todas") || name.equals("Curtidas")) { toast("Escolha outro nome");return; }
-                AudioLibrary.createPlaylist(this,name);filter=name;renderTabs();renderTracks();
+                if(AudioLibrary.playlistNames(this).contains(name)){toast("Já existe uma playlist com esse nome");return;}
+                AudioLibrary.createPlaylist(this,name);filter=name;currentScreen=2;renderTabs();renderTracks();
+                toast("Playlist criada: "+name);
             }).setNegativeButton("Cancelar",null).show();
     }
 
@@ -480,6 +507,7 @@ public class MainActivity extends Activity {
             showTrackList(songsContainer,highlight,Math.min(4,highlight.size()));
             songsContainer.addView(section("Suas playlists"));
             addHorizontalList(songsContainer,AudioLibrary.playlistNames(this));
+            renderCloudSection(songsContainer);
 
             songsContainer.addView(section("Recentes"));
             HorizontalScrollView sc=new HorizontalScrollView(this);
@@ -547,6 +575,7 @@ public class MainActivity extends Activity {
             tabs.addView(playlistBar);
             songsContainer.addView(tabs,margins(0,0,0,12,-1,40));
             renderTabs();
+            renderCloudSection(songsContainer);
             TextView counter=text(visible.size()+" músicas  •  toque e segure para organizar",12,MUTED,false);
             songsContainer.addView(counter,margins(0,0,0,12,-1,-2));
             showTrackList(songsContainer,visible,400);
@@ -706,15 +735,375 @@ public class MainActivity extends Activity {
     }
 
     private void showTrackOptions(Track track){
-        ArrayList<String> names=AudioLibrary.playlistNames(this);
-        if(names.isEmpty()){new AlertDialog.Builder(this).setMessage("Crie uma playlist para adicionar músicas.")
-            .setPositiveButton("Criar playlist",(d,w)->createPlaylist()).setNegativeButton("Cancelar",null).show();return;}
-        String[] labels=new String[names.size()];
-        for(int i=0;i<names.size();i++) labels[i]=(AudioLibrary.playlistUris(this,names.get(i)).contains(track.uri)?"✓  ":"+  ")+names.get(i);
-        new AlertDialog.Builder(this).setTitle("Adicionar/remover da playlist")
-            .setItems(labels,(d,which)->{
-                String name=names.get(which);AudioLibrary.togglePlaylistTrack(this,name,track.uri);renderTracks();toast("Playlist atualizada");
+        ArrayList<String> personal=AudioLibrary.playlistNames(this);
+        ArrayList<String> names=new ArrayList<>();
+        ArrayList<String> ids=new ArrayList<>();
+        for(String local:personal){
+            names.add((AudioLibrary.playlistUris(this,local).contains(track.uri)?"✓ ":"＋ ")+local);
+            ids.add("local:"+local);
+        }
+        for(CloudPlaylists.Room room:cloudRooms){
+            names.add("☁  "+room.name+"  ("+(room.kind.equals(CloudPlaylists.MATCH)?"Match":"colaborativa")+")");
+            ids.add("cloud:"+room.id);
+        }
+        names.add("＋ Criar playlist pessoal");ids.add("create");
+        new AlertDialog.Builder(this).setTitle("Adicionar ou remover • "+track.title)
+            .setItems(names.toArray(new String[0]),(dialog,index)->{
+                String chosen=ids.get(index);
+                if(chosen.equals("create")){createPlaylist();return;}
+                if(chosen.startsWith("local:")){
+                    AudioLibrary.togglePlaylistTrack(this,chosen.substring(6),track.uri);
+                    renderTracks();toast("Playlist atualizada");return;
+                }
+                String roomId=chosen.substring(6);
+                cloud.putSong(roomId,track,(success,error)->{
+                    if(error!=null){showCloudError(error);return;}
+                    toast("Música adicionada à playlist compartilhada");
+                    loadCloudRooms();
+                });
+            }).setNegativeButton("Cancelar",null).show();
+    }
+
+
+    // O menu Criar tem 3 caminhos reais, não é apenas visual.
+    private void openCreateMenu(){
+        String[] options={"Playlist pessoal","Playlist colaborativa","Match musical (até 10 amigos)"};
+        new AlertDialog.Builder(this).setTitle("Criar no Merlin")
+            .setItems(options,(dialog,which)->{
+                if(which==0)createPlaylist();
+                else createCloudDialog(which==1?CloudPlaylists.COLLAB:CloudPlaylists.MATCH);
+            }).setNegativeButton("Cancelar",null).show();
+    }
+    private void localPlaylistMenu(String name){
+        new AlertDialog.Builder(this).setTitle(name)
+            .setItems(new String[]{"Renomear playlist","Excluir playlist","Ver músicas"},(d,i)->{
+                if(i==0){
+                    EditText edit=new EditText(this);edit.setSingleLine(true);edit.setText(name);
+                    new AlertDialog.Builder(this).setTitle("Novo nome").setView(edit)
+                        .setPositiveButton("Salvar",(dialog,which)->{
+                            String newName=edit.getText().toString().trim();
+                            if(!AudioLibrary.renamePlaylist(this,name,newName)){
+                                toast("Nome inválido ou já utilizado");return;
+                            }
+                            if(filter.equals(name))filter=newName;
+                            renderTracks();toast("Playlist renomeada");
+                        }).setNegativeButton("Cancelar",null).show();
+                }else if(i==1){
+                    new AlertDialog.Builder(this).setTitle("Excluir "+name+"?")
+                        .setMessage("Somente a playlist será apagada. As músicas continuam no celular.")
+                        .setPositiveButton("Excluir",(dialog,which)->{
+                            if(AudioLibrary.deletePlaylist(this,name)){
+                                filter="Todas";renderTracks();toast("Playlist excluída");
+                            }else toast("Não foi possível excluir.");
+                        }).setNegativeButton("Cancelar",null).show();
+                }else{
+                    currentScreen=2;filter=name;renderTracks();
+                }
+            }).setNegativeButton("Fechar",null).show();
+    }
+    private void showCloudError(String message){
+        new AlertDialog.Builder(this).setTitle("Merlin • sincronização")
+            .setMessage(message).setPositiveButton("Entendi",null).show();
+    }
+    private void needFirebase(){
+        new AlertDialog.Builder(this).setTitle("Ativar playlists online")
+            .setMessage("A sincronização com amigos usa Firebase Authentication e Realtime Database. É preciso configurar o projeto Firebase e recompilar o APK com os dados de conexão. Playlists pessoais funcionam sem isso.\n\nVeja FIREBASE-SETUP.md no repositório Merlin.")
+            .setPositiveButton("Copiar guia",(d,w)->{
+                String url="https://github.com/sryck352-netizen/Jhon-/blob/merlin/Merlin/FIREBASE-SETUP.md";
+                ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE))
+                    .setPrimaryClip(android.content.ClipData.newPlainText("Guia Merlin",url));
+                toast("Link copiado");
+            }).setNegativeButton("Fechar",null).show();
+    }
+    private void createCloudDialog(String kind){
+        if(cloud==null||!cloud.configured()){needFirebase();return;}
+        EditText name=new EditText(this);name.setSingleLine(true);
+        name.setTextColor(TEXT);name.setHintTextColor(MUTED);
+        name.setHint(kind.equals(CloudPlaylists.MATCH)?"Nome do Match":"Nome da playlist colaborativa");
+        LinearLayout container=new LinearLayout(this);container.setPadding(dp(20),0,dp(20),0);
+        container.addView(name);
+        new AlertDialog.Builder(this)
+            .setTitle(kind.equals(CloudPlaylists.MATCH)?"Novo Match musical":"Nova playlist colaborativa")
+            .setView(container)
+            .setMessage(kind.equals(CloudPlaylists.MATCH)
+                ?"Convide até 10 amigos. As recomendações serão criadas a partir das curtidas que cada pessoa escolher compartilhar."
+                :"Todos os participantes poderão adicionar ou remover músicas. Os arquivos de áudio não são enviados aos amigos.")
+            .setPositiveButton("Criar",(d,w)->{
+                String title=name.getText().toString().trim();
+                if(title.length()<2||title.length()>60){toast("Use de 2 a 60 caracteres");return;}
+                cloud.createRoom(title,kind,(room,error)->{
+                    if(error!=null){showCloudError(error);return;}
+                    toast(kind.equals(CloudPlaylists.MATCH)?"Match criado":"Playlist colaborativa criada");
+                    loadCloudRooms();
+                    showCloudRoom(room);
+                });
+            }).setNegativeButton("Cancelar",null).show();
+    }
+    private void loadCloudRooms(){
+        if(cloud==null||!cloud.configured())return;
+        cloud.listRooms((rooms,error)->{
+            if(error==null&&rooms!=null){
+                cloudRooms=rooms;
+                if(currentScreen==0||currentScreen==2)renderTracks();
+            }
+        });
+    }
+    private void renderCloudSection(LinearLayout parent){
+        if(cloudRooms.isEmpty()){
+            TextView entry=action("♧   Playlists colaborativas e Match  •  entrar com convite",13,false);
+            entry.setOnClickListener(v->openJoinDialog());
+            parent.addView(entry,margins(0,2,0,10,-1,51));
+            return;
+        }
+        parent.addView(section("Compartilhadas e Match"));
+        for(CloudPlaylists.Room room:cloudRooms){
+            String mark=room.kind.equals(CloudPlaylists.MATCH)?"✧ ":"♧ ";
+            LinearLayout line=new LinearLayout(this);line.setGravity(Gravity.CENTER_VERTICAL);
+            TextView tile=text(mark,28,PURPLE,true);tile.setGravity(Gravity.CENTER);
+            tile.setBackground(round(0xFF382554,9));line.addView(tile,lp(55,55));
+            LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);
+            labels.setPadding(dp(12),0,0,0);
+            TextView title=text(room.name,15,TEXT,true);
+            TextView subtitle=text(room.participants()+" participantes · "+room.songCount()+" músicas",12,MUTED,false);
+            labels.addView(title);labels.addView(subtitle);
+            line.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+            parent.addView(line,margins(0,0,0,9,-1,60));
+            line.setOnClickListener(v->loadCloudRoom(room.id,true));
+        }
+        TextView enter=action("＋  Entrar com convite",12,false);
+        enter.setOnClickListener(v->openJoinDialog());
+        parent.addView(enter,margins(0,2,0,5,-1,46));
+    }
+    private void openJoinDialog(){
+        if(cloud==null||!cloud.configured()){needFirebase();return;}
+        EditText input=new EditText(this);
+        input.setTextColor(TEXT);input.setHintTextColor(MUTED);
+        input.setSingleLine(false);input.setMinLines(2);
+        input.setHint("Cole merlin://join?room=...&code=... ou id:código");
+        new AlertDialog.Builder(this).setTitle("Entrar com convite")
+            .setView(input).setPositiveButton("Entrar",(d,w)->joinCloudRoom(input.getText().toString()))
+            .setNegativeButton("Cancelar",null).show();
+    }
+    private void handleJoinIntent(Intent intent){
+        if(intent==null||intent.getData()==null)return;
+        Uri u=intent.getData();
+        if(!"merlin".equals(u.getScheme())||!"join".equals(u.getHost()))return;
+        String full=u.toString();
+        new AlertDialog.Builder(this).setTitle("Convite para o Merlin")
+            .setMessage("Deseja entrar nesta playlist compartilhada?")
+            .setPositiveButton("Aceitar",(d,w)->joinCloudRoom(full))
+            .setNegativeButton("Cancelar",null).show();
+    }
+    private void joinCloudRoom(String invite){
+        if(cloud==null||!cloud.configured()){needFirebase();return;}
+        cloud.join(invite,(room,error)->{
+            if(error!=null){showCloudError(error);return;}
+            toast("Você entrou em "+room.name);
+            loadCloudRooms();showCloudRoom(room);
+        });
+    }
+    private void loadCloudRoom(String roomId,boolean open){
+        if(cloud==null||!cloud.configured())return;
+        cloud.getRoom(roomId,(room,error)->{
+            if(error!=null){showCloudError(error);return;}
+            if(open)showCloudRoom(room);
+            else if(activeRoomDialog!=null&&activeRoomDialog.isShowing()&&roomId.equals(activeRoomId))
+                drawCloudRoom(room);
+        });
+    }
+    private void showCloudRoom(CloudPlaylists.Room room){
+        if(activeRoomDialog!=null&&activeRoomDialog.isShowing())activeRoomDialog.dismiss();
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);
+        activeRoomContent=new LinearLayout(this);
+        activeRoomContent.setOrientation(LinearLayout.VERTICAL);
+        activeRoomContent.setPadding(dp(18),dp(12),dp(18),dp(20));
+        activeRoomContent.setBackgroundColor(BG);
+        scroll.addView(activeRoomContent);
+        AlertDialog dialog=new AlertDialog.Builder(this).setView(scroll)
+            .setNegativeButton("Fechar",null).create();
+        activeRoomDialog=dialog;activeRoomId=room.id;
+        dialog.setOnDismissListener(d->{
+            if(activeRoomDialog==dialog){
+                if(roomPoll!=null)handler.removeCallbacks(roomPoll);
+                activeRoomDialog=null;activeRoomContent=null;activeRoomId="";
+            }
+        });
+        dialog.show();
+        if(dialog.getWindow()!=null)dialog.getWindow().setLayout(-1,-1);
+        drawCloudRoom(room);
+        roomPoll=new Runnable(){
+            @Override public void run(){
+                if(!dialog.isShowing()||!room.id.equals(activeRoomId))return;
+                loadCloudRoom(room.id,false);
+                handler.postDelayed(this,8500);
+            }
+        };
+        handler.postDelayed(roomPoll,8500);
+    }
+    private void drawCloudRoom(CloudPlaylists.Room room){
+        if(activeRoomContent==null||activeRoomDialog==null||!activeRoomDialog.isShowing())return;
+        LinearLayout page=activeRoomContent;page.removeAllViews();
+        boolean match=CloudPlaylists.MATCH.equals(room.kind);
+        TextView title=text((match?"✧ ":"♧ ")+room.name,24,TEXT,true);
+        page.addView(title,margins(0,3,0,4,-1,48));
+        page.addView(text((match?"Match musical":"Playlist colaborativa")+" · "+
+            room.participants()+"/11 participantes",13,MUTED,false));
+        StringBuilder names=new StringBuilder("Participantes: ");
+        Iterator<String> participants=room.members.keys();
+        while(participants.hasNext()){
+            JSONObject member=room.members.optJSONObject(participants.next());
+            if(member!=null){
+                if(names.length()>15)names.append(", ");
+                names.append(member.optString("name","Ouvinte"));
+            }
+        }
+        TextView members=text(names.toString(),12,MUTED,false);
+        members.setPadding(0,dp(10),0,dp(5));
+        page.addView(members);
+        if(room.owner.equals(cloud.userId())){
+            TextView invite=action("⇧  Convidar amigos (até 10)",14,true);
+            page.addView(invite,margins(0,8,0,7,-1,49));
+            invite.setOnClickListener(v->cloud.invite(room.id,(link,error)->{
+                if(error!=null){showCloudError(error);return;}
+                new AlertDialog.Builder(this).setTitle("Convite criado")
+                    .setMessage("Convite válido por 7 dias. Quem tiver o link poderá entrar até o limite de participantes.\n\n"+link)
+                    .setPositiveButton("Compartilhar",(d,w)->shareInvite(link))
+                    .setNeutralButton("Copiar",(d,w)->{
+                        ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE))
+                            .setPrimaryClip(android.content.ClipData.newPlainText("Convite Merlin",link));
+                        toast("Convite copiado");
+                    }).setNegativeButton("Fechar",null).show();
+            }));
+        }
+        TextView add=action("＋  Adicionar música da biblioteca",14,false);
+        page.addView(add,margins(0,8,0,5,-1,49));
+        add.setOnClickListener(v->pickTrackForRoom(room.id));
+        if(match){
+            page.addView(section("Gostos musicais compartilhados"));
+            TextView shareTaste=action("♥  Compartilhar minhas curtidas",14,false);
+            page.addView(shareTaste,margins(0,0,0,10,-1,50));
+            shareTaste.setOnClickListener(v->confirmTasteSharing(room.id));
+            List<JSONObject> recommended=CloudPlaylists.recommendations(room,16);
+            page.addView(section("Recomendações para o grupo"));
+            if(recommended.isEmpty())
+                page.addView(text("Nenhum participante compartilhou curtidas ainda.",13,MUTED,false));
+            else for(JSONObject rec:recommended){
+                TextView t=text(rec.optString("title")+" · "+rec.optString("artist")+
+                    "   ♥ "+rec.optInt("votes",0),13,TEXT,false);
+                t.setPadding(dp(8),dp(8),dp(6),dp(8));
+                page.addView(t);
+            }
+            TextView generate=action("✧  Gerar playlist compartilhada",14,true);
+            page.addView(generate,margins(0,11,0,5,-1,50));
+            generate.setOnClickListener(v->{
+                new AlertDialog.Builder(this).setTitle("Gerar playlist do Match?")
+                    .setMessage("As recomendações serão adicionadas à playlist do grupo. Todos os participantes poderão vê-las e alterá-las.")
+                    .setPositiveButton("Gerar",(d,w)->cloud.saveMatch(room.id,(count,error)->{
+                        if(error!=null){showCloudError(error);return;}
+                        toast(count==0?"Compartilhem curtidas para gerar recomendações":count+" recomendações processadas");
+                        loadCloudRoom(room.id,false);loadCloudRooms();
+                    })).setNegativeButton("Cancelar",null).show();
+            });
+        }
+        page.addView(section("Músicas compartilhadas ("+room.songCount()+")"));
+        if(room.songCount()==0)
+            page.addView(text("Nenhuma música adicionada. Toque em Adicionar música para começar.",13,MUTED,false));
+        Iterator<String> keys=room.songs.keys();
+        while(keys.hasNext()){
+            String hash=keys.next();JSONObject item=room.songs.optJSONObject(hash);
+            if(item==null)continue;
+            String songTitle=item.optString("title","Música");
+            String artist=item.optString("artist","");
+            TextView row=action("♫  "+songTitle+"\n     "+artist,13,false);
+            page.addView(row,margins(0,0,0,6,-1,65));
+            row.setOnClickListener(v->{
+                new AlertDialog.Builder(this).setTitle(songTitle)
+                    .setItems(new String[]{"Reproduzir (se disponível neste celular)","Remover da playlist"},(d,choice)->{
+                        if(choice==0){
+                            Track local=findTrack(songTitle,artist);
+                            if(local==null){toast("Baixe ou importe esta música no seu celular para tocar");return;}
+                            filter="Todas";visible=new ArrayList<>(tracks);
+                            playSelection(local);
+                        }else{
+                            new AlertDialog.Builder(this).setTitle("Remover música?")
+                                .setMessage("A música será removida da playlist de todos, mas nenhum arquivo será apagado.")
+                                .setPositiveButton("Remover",(dialog,which)->cloud.removeSong(room.id,hash,(ok,error)->{
+                                    if(error!=null){showCloudError(error);return;}
+                                    toast("Música removida para todos");
+                                    loadCloudRoom(room.id,false);
+                                    loadCloudRooms();
+                                })).setNegativeButton("Cancelar",null).show();
+                        }
+                    }).show();
+            });
+        }
+        TextView manage=action(room.owner.equals(cloud.userId())?
+            "⚙  Renomear ou excluir grupo":"◁  Sair desta playlist",13,false);
+        page.addView(manage,margins(0,18,0,0,-1,46));
+        manage.setOnClickListener(v->manageCloudRoom(room));
+    }
+    private void manageCloudRoom(CloudPlaylists.Room room){
+        boolean owner=room.owner.equals(cloud.userId());
+        new AlertDialog.Builder(this).setTitle("Gerenciar • "+room.name)
+            .setItems(owner?new String[]{"Renomear grupo","Excluir grupo para todos"}:
+                new String[]{"Sair da playlist"},(dialog,index)->{
+                if(owner&&index==0){
+                    EditText name=new EditText(this);name.setText(room.name);
+                    new AlertDialog.Builder(this).setTitle("Novo nome").setView(name)
+                        .setPositiveButton("Salvar",(d,w)->cloud.renameRoom(room.id,name.getText().toString(),(ok,error)->{
+                            if(error!=null){showCloudError(error);return;}
+                            toast("Grupo renomeado");loadCloudRoom(room.id,false);loadCloudRooms();
+                        })).setNegativeButton("Cancelar",null).show();
+                }else{
+                    new AlertDialog.Builder(this).setTitle(owner?"Excluir para todos?":"Sair da playlist?")
+                        .setMessage(owner?"Todos perderão o acesso e os metadados do grupo serão apagados.":"Você sairá da playlist e deixará de receber atualizações.")
+                        .setPositiveButton(owner?"Excluir":"Sair",(d,w)->cloud.removeRoom(room.id,(ok,error)->{
+                            if(error!=null){showCloudError(error);return;}
+                            if(activeRoomDialog!=null)activeRoomDialog.dismiss();
+                            toast(owner?"Grupo excluído":"Você saiu da playlist");
+                            loadCloudRooms();
+                        })).setNegativeButton("Cancelar",null).show();
+                }
             }).show();
+    }
+    private void shareInvite(String link){
+        Intent share=new Intent(Intent.ACTION_SEND);
+        share.setType("text/plain");
+        share.putExtra(Intent.EXTRA_TEXT,"Entre no meu Merlin: "+link);
+        startActivity(Intent.createChooser(share,"Enviar convite do Merlin"));
+    }
+    private Track findTrack(String title,String artist){
+        for(Track t:tracks){
+            if(t.title.equalsIgnoreCase(title)&&t.artist.equalsIgnoreCase(artist))return t;
+        }
+        return null;
+    }
+    private void pickTrackForRoom(String roomId){
+        if(tracks.isEmpty()){toast("Importe algumas músicas antes de adicionar");return;}
+        String[] songs=new String[Math.min(250,tracks.size())];
+        for(int i=0;i<songs.length;i++)songs[i]=tracks.get(i).title+" — "+tracks.get(i).artist;
+        new AlertDialog.Builder(this).setTitle("Adicionar à playlist")
+            .setItems(songs,(d,which)->{
+                Track selected=tracks.get(which);
+                cloud.putSong(roomId,selected,(ok,error)->{
+                    if(error!=null){showCloudError(error);return;}
+                    toast("Música sincronizada");
+                    loadCloudRoom(roomId,false);loadCloudRooms();
+                });
+            }).setNegativeButton("Cancelar",null).show();
+    }
+    private void confirmTasteSharing(String roomId){
+        HashSet<String> liked=AudioLibrary.favorites(this);
+        ArrayList<Track> favorites=new ArrayList<>();
+        for(Track track:tracks)if(liked.contains(track.uri))favorites.add(track);
+        if(favorites.isEmpty()){toast("Curta algumas músicas antes de compartilhar seus gostos");return;}
+        int quantity=Math.min(50,favorites.size());
+        new AlertDialog.Builder(this).setTitle("Compartilhar seus gostos?")
+            .setMessage("Os títulos e artistas de até "+quantity+" músicas curtidas serão visíveis aos participantes deste Match. Nenhum arquivo ou histórico privado será enviado. Você pode atualizar sua seleção depois.")
+            .setPositiveButton("Compartilhar",(d,w)->cloud.publishTastes(roomId,favorites,(ok,error)->{
+                if(error!=null){showCloudError(error);return;}
+                toast("Seus gostos foram compartilhados");loadCloudRoom(roomId,false);
+            })).setNegativeButton("Cancelar",null).show();
     }
 
     private void playSelection(Track track){

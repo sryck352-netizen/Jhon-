@@ -685,6 +685,19 @@ public class MainActivity extends Activity {
         body.setPadding(dp(22),dp(24),dp(22),dp(28));body.setBackgroundColor(0xFF202020);
         TextView heading=text("Merlin   •   Perfil",25,TEXT,true);body.addView(heading,lp(-1,55));
         body.addView(text("Sua música, do seu jeito.",13,MUTED,false));
+        TextView nickname=action("✎  Nome nas playlists: "+cloud.nickname(),14,false);
+        body.addView(nickname,margins(0,14,0,10,-1,49));
+        nickname.setOnClickListener(v->{
+            EditText input=new EditText(this);input.setSingleLine(true);
+            input.setText(cloud.nickname());
+            new AlertDialog.Builder(this).setTitle("Nome para os amigos")
+                .setView(input).setPositiveButton("Salvar",(d,w)->{
+                    String name=input.getText().toString().trim();
+                    if(name.isEmpty()){toast("Informe seu nome");return;}
+                    cloud.setNickname(name);nickname.setText("✎  Nome nas playlists: "+cloud.nickname());
+                    toast("Nome salvo para os próximos convites");
+                }).setNegativeButton("Cancelar",null).show();
+        });
         body.addView(section("Sua atividade"));
         TextView recent=action("◷   Músicas recentes",15,false);
         body.addView(recent,margins(0,0,0,9,-1,52));

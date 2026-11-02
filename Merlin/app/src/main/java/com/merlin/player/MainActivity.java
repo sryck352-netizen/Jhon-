@@ -10,6 +10,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.media.MediaMetadataRetriever;
+import android.widget.ImageView;
+import android.util.LruCache;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -43,16 +50,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
-    private final int BG = Color.rgb(9,8,19);
-    private final int SURFACE = Color.rgb(25,22,42);
-    private final int PURPLE = Color.rgb(165,113,255);
-    private final int TEXT = Color.rgb(248,246,255);
-    private final int MUTED = Color.rgb(166,160,185);
+    private final int BG = 0xFF111111;
+    private final int SURFACE = 0xFF292929;
+    private final int PURPLE = 0xFF1ED760;
+    private final int TEXT = 0xFFF9F9F9;
+    private final int MUTED = 0xFFAAAAAA;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Track> tracks = new ArrayList<>();
     private List<Track> visible = new ArrayList<>();
-    private LinearLayout songsContainer, playlistBar;
+    private LinearLayout songsContainer, playlistBar, navBottom;
+    private EditText searchField;
+    private int currentScreen = 0; // 0 início, 1 busca, 2 biblioteca
+    private final LruCache<String,Bitmap> artCache = new LruCache<>(80);
     private TextView countText, miniTitle, miniArtist, miniPlay, miniArt;
     private SeekBar miniSeek;
     private String search = "", filter = "Todas";
@@ -103,75 +113,256 @@ public class MainActivity extends Activity {
         super.onStop();
     }
 
+
     private void buildUI(){
-        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(BG);
+        LinearLayout root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
         if(Build.VERSION.SDK_INT>=35) root.setOnApplyWindowInsetsListener((v,insets)-> {
             android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars());
-            v.setPadding(0,bars.top,0,bars.bottom);return insets;
+            v.setPadding(0,bars.top,0,bars.bottom);
+            return insets;
         });
         setContentView(root);
-        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(22),dp(18),dp(22),dp(11));
-        LinearLayout brand=new LinearLayout(this);brand.setOrientation(LinearLayout.VERTICAL);
-        TextView title=text("✧ Merlin",32,TEXT,true);brand.addView(title);
-        brand.addView(text("Seu universo musical",12,MUTED,false));
-        header.addView(brand,new LinearLayout.LayoutParams(0,dp(62),1));
-        TextView importBtn=action("+ Importar",13,true);
-        importBtn.setOnClickListener(v->pickAudio());
-        header.addView(importBtn); root.addView(header);
 
-        LinearLayout hero=new LinearLayout(this);hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setBackground(gradient());hero.setPadding(dp(22),dp(20),dp(22),dp(20));
-        LinearLayout.LayoutParams heroLp=lp(-1,-2);heroLp.setMargins(dp(18),dp(10),dp(18),dp(17));
-        hero.addView(text("MÚSICA SEM LIMITES",11,0xFFE5C7FF,true));
-        TextView heroTitle=text("Toda a sua música.\\nEm um só lugar.",23,TEXT,true);
-        heroTitle.setText("Toda a sua música.\nEm um só lugar.");
-        LinearLayout.LayoutParams ht=lp(-1,-2);ht.topMargin=dp(8);hero.addView(heroTitle,ht);
-        TextView heroInfo=text("Ouça seus downloads do Snaptube e do celular, inclusive offline.",13,0xFFD4CBE5,false);
-        LinearLayout.LayoutParams hi=lp(-1,-2);hi.topMargin=dp(10);hero.addView(heroInfo,hi);
-        LinearLayout hBtns=new LinearLayout(this);hBtns.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams hb=lp(-1,-2);hb.topMargin=dp(17);
-        TextView importHero=action("Importar músicas",13,true);
-        importHero.setOnClickListener(v->pickAudio());hBtns.addView(importHero);
-        TextView refresh=action("↻",20,false);
-        LinearLayout.LayoutParams rf=lp(50,44);rf.leftMargin=dp(10);
-        refresh.setOnClickListener(v->loadTracks());hBtns.addView(refresh,rf);
-        hero.addView(hBtns,hb);root.addView(hero,heroLp);
-
-        EditText searchField=new EditText(this);searchField.setSingleLine(true);searchField.setTextColor(TEXT);
-        searchField.setHintTextColor(MUTED);searchField.setTextSize(14);searchField.setHint("⌕   Buscar músicas e artistas");
-        searchField.setBackground(round(SURFACE,16));searchField.setPadding(dp(17),0,dp(15),0);
-        LinearLayout.LayoutParams sf=lp(-1,49);sf.setMargins(dp(18),0,dp(18),dp(16));
-        root.addView(searchField,sf);
-        searchField.addTextChangedListener(new TextWatcher(){
-            @Override public void beforeTextChanged(CharSequence s,int start,int count,int after) {}
-            @Override public void onTextChanged(CharSequence s,int start,int before,int count) { search=s.toString().toLowerCase(Locale.ROOT);renderTracks(); }
-            @Override public void afterTextChanged(Editable e) {}
+        LinearLayout top=new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setPadding(dp(18),dp(12),dp(14),dp(12));
+        TextView badge=text("M",19,0xFFEADFFF,true);
+        badge.setGravity(Gravity.CENTER);
+        GradientDrawable bg=round(0xFF57348C,99);
+        badge.setBackground(bg);
+        top.addView(badge,lp(39,39));
+        top.addView(chip("Tudo",true,()->{filter="Todas";currentScreen=0;renderTracks();}),margins(9,0,0,0, -2,38));
+        top.addView(chip("Música",false,()->{filter="Todas";currentScreen=2;renderTracks();}),margins(8,0,0,0,-2,38));
+        top.addView(chip("Curtidas",false,()->{filter="Curtidas";currentScreen=2;renderTracks();}),margins(8,0,0,0,-2,38));
+        root.addView(top);
+        // A biblioteca e a busca ocupam a mesma área, sem páginas web.
+        searchField=new EditText(this);
+        searchField.setSingleLine(true);
+        searchField.setTextColor(TEXT);
+        searchField.setTextSize(15);
+        searchField.setHintTextColor(MUTED);
+        searchField.setHint("⌕  O que você quer ouvir?");
+        searchField.setPadding(dp(15),0,dp(15),0);
+        searchField.setBackground(round(0xFF2C2C2C,10));
+        LinearLayout.LayoutParams sp=margins(18,1,18,8,-1,50);
+        root.addView(searchField,sp);
+        searchField.setVisibility(View.GONE);
+        searchField.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence s,int start,int before,int count){
+                search=s.toString().toLowerCase(Locale.ROOT);renderTracks();
+            }
+            @Override public void afterTextChanged(Editable e){}
         });
 
-        HorizontalScrollView tabs=new HorizontalScrollView(this);tabs.setHorizontalScrollBarEnabled(false);
-        LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.HORIZONTAL);
-        wrap.setPadding(dp(18),0,dp(12),dp(6));
-        playlistBar=wrap;tabs.addView(wrap);root.addView(tabs,lp(-1,55));
-        countText=text("Carregando músicas...",13,MUTED,false);
-        countText.setPadding(dp(20),dp(8),0,dp(8));root.addView(countText);
+        ScrollView scroll=new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        songsContainer=new LinearLayout(this);
+        songsContainer.setOrientation(LinearLayout.VERTICAL);
+        songsContainer.setPadding(dp(18),dp(4),dp(18),dp(22));
+        scroll.addView(songsContainer);
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
 
-        ScrollView scroller=new ScrollView(this);scroller.setFillViewport(false);
-        songsContainer=new LinearLayout(this);songsContainer.setOrientation(LinearLayout.VERTICAL);
-        songsContainer.setPadding(dp(14),dp(3),dp(14),dp(12));scroller.addView(songsContainer);
-        root.addView(scroller,new LinearLayout.LayoutParams(-1,0,1));
+        // Barra permanente de reprodução, mesmo com a tela bloqueada.
         buildMini(root);
-        renderTabs();
+        navBottom=new LinearLayout(this);
+        navBottom.setGravity(Gravity.CENTER);
+        navBottom.setBackgroundColor(BG);
+        root.addView(navBottom,lp(-1,58));
+        countText=text("",13,MUTED,false);
+        updateNavigation();
         renderTracks();
+    }
+
+    private LinearLayout.LayoutParams margins(int left,int top,int right,int bottom,int width,int height) {
+        LinearLayout.LayoutParams p=lp(width,height);
+        p.setMargins(dp(left),dp(top),dp(right),dp(bottom));
+        return p;
+    }
+    private TextView chip(String name,boolean active,Runnable click){
+        TextView b=text(name,13,active?0xFF111111:TEXT,active);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(17),0,dp(17),0);
+        b.setBackground(round(active?PURPLE:0xFF303030,28));
+        b.setOnClickListener(v->click.run());
+        return b;
+    }
+    private TextView section(String s) {
+        TextView t=text(s,21,TEXT,true);
+        t.setPadding(0,dp(20),0,dp(13));
+        return t;
+    }
+    private void updateNavigation(){
+        if(navBottom==null)return;
+        navBottom.removeAllViews();
+        addNav("⌂","Início",0,()->{currentScreen=0;filter="Todas";search="";renderTracks();});
+        addNav("⌕","Buscar",1,()->{currentScreen=1;filter="Todas";renderTracks();searchField.requestFocus();});
+        addNav("▥","Biblioteca",2,()->{currentScreen=2;renderTracks();});
+        addNav("+","Criar",-1,()->createPlaylist());
+    }
+    private void addNav(String icon,String name,int page,Runnable click){
+        LinearLayout col=new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+        TextView symbol=text(icon,28,page==currentScreen?TEXT:MUTED,true);
+        symbol.setGravity(Gravity.CENTER);
+        TextView txt=text(name,10,page==currentScreen?TEXT:MUTED,page==currentScreen);
+        txt.setGravity(Gravity.CENTER);
+        col.addView(symbol,lp(-1,32));
+        col.addView(txt,lp(-1,15));
+        navBottom.addView(col,new LinearLayout.LayoutParams(0,dp(58),1));
+        col.setOnClickListener(v->click.run());
+    }
+    private View cover(Track t,int size){
+        FrameLayout frame=new FrameLayout(this);
+        GradientDrawable background=new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+            new int[]{0xFF7247A8,0xFF2E3A6C,0xFFB04B75});
+        background.setCornerRadius(dp(4));
+        frame.setBackground(background);
+        frame.setClipToOutline(true);
+        TextView mark=text("♫",size>=100?48:23,0xFFEFE6FF,true);
+        mark.setGravity(Gravity.CENTER);
+        frame.addView(mark,new FrameLayout.LayoutParams(-1,-1));
+        if(t!=null){
+            ImageView img=new ImageView(this);
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img.setTag(t.uri);
+            frame.addView(img,new FrameLayout.LayoutParams(-1,-1));
+            Bitmap b=artCache.get(t.uri);
+            if(b!=null)img.setImageBitmap(b);
+            else worker.execute(()->{
+                Bitmap cover=null;
+                MediaMetadataRetriever retriever=new MediaMetadataRetriever();
+                try{
+                    retriever.setDataSource(getApplicationContext(),Uri.parse(t.uri));
+                    byte[] bytes=retriever.getEmbeddedPicture();
+                    if(bytes!=null){
+                        BitmapFactory.Options opt=new BitmapFactory.Options();
+                        opt.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,opt);
+                        int max=Math.max(opt.outWidth,opt.outHeight);
+                        opt.inSampleSize=Math.max(1,max/320);
+                        opt.inJustDecodeBounds=false;
+                        Bitmap decoded=BitmapFactory.decodeByteArray(bytes,0,bytes.length,opt);
+                        if(decoded!=null){
+                            cover=Bitmap.createScaledBitmap(decoded,Math.min(320,decoded.getWidth()),
+                                Math.min(320,decoded.getHeight()),true);
+                            if(cover!=decoded) decoded.recycle();
+                        }
+                    }
+                }catch(Exception ignored){}finally{try{retriever.release();}catch(Exception ignored){}}
+                if(cover!=null){
+                    Bitmap result=cover;
+                    artCache.put(t.uri,result);
+                    handler.post(()->{
+                        if(t.uri.equals(img.getTag()))img.setImageBitmap(result);
+                    });
+                }
+            });
+        }
+        return frame;
+    }
+    private View quickTile(String name,Track art,Runnable click){
+        LinearLayout row=new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(round(SURFACE,5));
+        row.addView(cover(art,56),lp(56,56));
+        TextView title=text(name,12,TEXT,true);
+        title.setMaxLines(2);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        title.setPadding(dp(9),0,dp(5),0);
+        row.addView(title,new LinearLayout.LayoutParams(0,-1,1));
+        row.setOnClickListener(v->click.run());
+        return row;
+    }
+    private void sectionRow(LinearLayout parent,String name,Track t,Runnable click){
+        LinearLayout row=new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(cover(t,55),lp(55,55));
+        LinearLayout names=new LinearLayout(this);
+        names.setPadding(dp(13),0,dp(6),0);
+        names.setOrientation(LinearLayout.VERTICAL);
+        TextView song=text(name,15,TEXT,false);
+        song.setSingleLine(true);song.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView artist=text(t==null?"Playlist":t.artist,12,MUTED,false);
+        artist.setSingleLine(true);artist.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        names.addView(song);names.addView(artist);
+        row.addView(names,new LinearLayout.LayoutParams(0,-2,1));
+        TextView menu=text("⋮",24,MUTED,false);menu.setGravity(Gravity.CENTER);
+        row.addView(menu,lp(35,48));
+        menu.setOnClickListener(v->{if(t!=null)showTrackOptions(t);else createPlaylist();});
+        row.setOnClickListener(v->click.run());
+        parent.addView(row,margins(0,0,0,8,-1,63));
+    }
+    private void addPlaylistCard(LinearLayout strip,String name,Track art,Runnable click){
+        LinearLayout item=new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.addView(cover(art,156),lp(155,155));
+        TextView label=text(name,13,TEXT,true);
+        label.setSingleLine(true);label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        item.addView(label,margins(0,7,0,0,-1,23));
+        item.addView(text("Merlin • Playlist",11,MUTED,false));
+        strip.addView(item,margins(0,0,15,0,155,-2));
+        item.setOnClickListener(v->click.run());
+    }
+    private void addHorizontalList(LinearLayout parent,ArrayList<String> names){
+        HorizontalScrollView sc=new HorizontalScrollView(this);
+        sc.setHorizontalScrollBarEnabled(false);
+        LinearLayout line=new LinearLayout(this);line.setOrientation(LinearLayout.HORIZONTAL);
+        for(String name:names){
+            Track first=null;
+            HashSet<String> selected=AudioLibrary.playlistUris(this,name);
+            for(Track t:tracks){if(selected.contains(t.uri)){first=t;break;}}
+            final String choice=name;
+            addPlaylistCard(line,name,first,()->{filter=choice;currentScreen=2;renderTracks();});
+        }
+        if(names.isEmpty())addPlaylistCard(line,"Criar playlist",null,()->createPlaylist());
+        sc.addView(line);parent.addView(sc,lp(-1,205));
+    }
+    private void showTrackList(LinearLayout parent,List<Track> list,int limit){
+        if(list.isEmpty()){
+            TextView empty=text("Suas músicas aparecerão aqui.\nImporte músicas baixadas para começar.",14,MUTED,false);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(15),dp(22),dp(15),dp(22));
+            parent.addView(empty);
+            return;
+        }
+        for(int i=0;i<Math.min(limit,list.size());i++){
+            Track t=list.get(i);
+            sectionRow(parent,t.title,t,()->playSelection(t));
+        }
+    }
+    private ArrayList<Track> getRecent(){
+        ArrayList<Track> r=new ArrayList<>();
+        java.util.Set<String> recent=getSharedPreferences("merlin_library",0)
+            .getStringSet("recent_uris",new HashSet<>());
+        // Mantém as mais recentes por meio de uma lista ordenada separada.
+        String sequence=getSharedPreferences("merlin_library",0).getString("recent_sequence","");
+        for(String uri:sequence.split("\n")){
+            for(Track t:tracks)if(t.uri.equals(uri)&&!r.contains(t))r.add(t);
+        }
+        return r;
+    }
+    private void remember(Track track){
+        String old=getSharedPreferences("merlin_library",0).getString("recent_sequence","");
+        StringBuilder recent=new StringBuilder(track.uri);
+        int total=1;
+        for(String uri:old.split("\n")){
+            if(uri.isEmpty()||uri.equals(track.uri))continue;
+            if(total++>=20)break;
+            recent.append("\n").append(uri);
+        }
+        getSharedPreferences("merlin_library",0).edit().putString("recent_sequence",recent.toString()).apply();
     }
 
     private void buildMini(LinearLayout root) {
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setBackground(round(0xFF2B2144,15));
+        wrap.setBackground(round(0xFF542137,9));
         LinearLayout.LayoutParams wl=lp(-1,-2);wl.setMargins(dp(10),dp(5),dp(10),dp(10));
         LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(10),dp(8),dp(8),dp(5));
-        miniArt=text("♫",26,TEXT,true);miniArt.setGravity(Gravity.CENTER);miniArt.setBackground(round(0xFF7046A7,11));
+        miniArt=text("♫",26,TEXT,true);miniArt.setGravity(Gravity.CENTER);miniArt.setBackground(round(0xFF75405B,5));
         bar.addView(miniArt,lp(47,47));
         LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);
         names.setPadding(dp(12),0,dp(4),0);
@@ -194,22 +385,20 @@ public class MainActivity extends Activity {
             @Override public void onStartTrackingTouch(SeekBar s) { }
             @Override public void onStopTrackingTouch(SeekBar s){seek(s.getProgress());}
         });
-        wrap.addView(miniSeek,lp(-1,25));root.addView(wrap,wl);
+        wrap.addView(miniSeek,lp(-1,11));root.addView(wrap,wl);
     }
 
+
     private void renderTabs(){
+        if(playlistBar==null)return;
         playlistBar.removeAllViews();
-        ArrayList<String> labels=new ArrayList<>();labels.add("Todas");labels.add("Curtidas");
-        labels.addAll(AudioLibrary.playlistNames(this));
-        for(String label:labels){
-            boolean selected=label.equals(filter);
-            TextView t=action(label,13,selected);
-            if(!selected)t.setTextColor(MUTED);
-            LinearLayout.LayoutParams tl=lp(-2,40);tl.rightMargin=dp(8);playlistBar.addView(t,tl);
-            t.setOnClickListener(v->{filter=label;renderTabs();renderTracks();});
+        ArrayList<String> names=new ArrayList<>();
+        names.add("Todas");names.add("Curtidas");
+        names.addAll(AudioLibrary.playlistNames(this));
+        for(String name:names){
+            TextView b=chip(name,name.equals(filter),()->{filter=name;renderTracks();});
+            playlistBar.addView(b,margins(0,0,8,0,-2,38));
         }
-        TextView create=action("+ Playlist",13,false);
-        playlistBar.addView(create,lp(-2,40));create.setOnClickListener(v->createPlaylist());
     }
 
     private void createPlaylist(){
@@ -224,44 +413,122 @@ public class MainActivity extends Activity {
             }).setNegativeButton("Cancelar",null).show();
     }
 
+
     private void renderTracks(){
         if(songsContainer==null)return;
-        HashSet<String> fav=AudioLibrary.favorites(this);
-        HashSet<String> chosen = filter.equals("Todas") || filter.equals("Curtidas") ? null : AudioLibrary.playlistUris(this,filter);
+        songsContainer.removeAllViews();
+        if(searchField!=null)searchField.setVisibility(currentScreen==1?View.VISIBLE:View.GONE);
+        updateNavigation();
+        HashSet<String> liked=AudioLibrary.favorites(this);
+        HashSet<String> selected=filter.equals("Todas")||filter.equals("Curtidas")
+            ?null:AudioLibrary.playlistUris(this,filter);
         visible=new ArrayList<>();
         for(Track t:tracks){
-            if(filter.equals("Curtidas") && !fav.contains(t.uri))continue;
-            if(chosen!=null && !chosen.contains(t.uri))continue;
-            if(!search.isEmpty() && !(t.title.toLowerCase(Locale.ROOT).contains(search) || t.artist.toLowerCase(Locale.ROOT).contains(search)))continue;
+            if(filter.equals("Curtidas")&&!liked.contains(t.uri))continue;
+            if(selected!=null&&!selected.contains(t.uri))continue;
+            if(!search.isEmpty() && currentScreen==1 &&
+                !t.title.toLowerCase(Locale.ROOT).contains(search)&&
+                !t.artist.toLowerCase(Locale.ROOT).contains(search))continue;
             visible.add(t);
         }
-        countText.setText(visible.size()+" músicas" + (visible.isEmpty()?" • Importe ou atualize sua biblioteca":""));
-        songsContainer.removeAllViews();
-        if(visible.isEmpty()){
-            TextView empty=text("Nenhuma música por aqui ainda.\n\nToque em Importar para escolher MP3, M4A ou outros arquivos de áudio.",14,MUTED,false);
-            empty.setGravity(Gravity.CENTER);empty.setPadding(dp(26),dp(40),dp(26),dp(40));
-            songsContainer.addView(empty);
-            return;
+        countText.setText(visible.size()+" músicas");
+        if(currentScreen==0){
+            // Atalhos em grade inspirados na organização da biblioteca do usuário.
+            ArrayList<String> shortcuts=new ArrayList<>();
+            shortcuts.add("Músicas Curtidas");shortcuts.add("Todas as músicas");
+            shortcuts.addAll(AudioLibrary.playlistNames(this));
+            if(shortcuts.size()>6)shortcuts=new ArrayList<>(shortcuts.subList(0,6));
+            for(int i=0;i<shortcuts.size();i+=2){
+                LinearLayout line=new LinearLayout(this);
+                line.setOrientation(LinearLayout.HORIZONTAL);
+                for(int col=0;col<2;col++){
+                    int k=i+col;if(k>=shortcuts.size())break;
+                    String name=shortcuts.get(k);
+                    String p=name.equals("Músicas Curtidas")?"Curtidas":
+                             name.equals("Todas as músicas")?"Todas":name;
+                    Track sample=null;
+                    for(Track t:tracks){
+                        if(p.equals("Todas")||(p.equals("Curtidas")&&liked.contains(t.uri))||
+                            (!p.equals("Curtidas")&&AudioLibrary.playlistUris(this,p).contains(t.uri))){
+                            sample=t;break;
+                        }
+                    }
+                    LinearLayout.LayoutParams a=new LinearLayout.LayoutParams(0,dp(56),1);
+                    if(col==1)a.leftMargin=dp(9);
+                    line.addView(quickTile(name,sample,()->{filter=p;currentScreen=2;renderTracks();}),a);
+                }
+                songsContainer.addView(line,margins(0,0,0,9,-1,56));
+            }
+
+            ArrayList<Track> recently=getRecent();
+            List<Track> highlight=recently.isEmpty()?tracks:recently;
+            songsContainer.addView(section("Não sai do seu fone"));
+            showTrackList(songsContainer,highlight,Math.min(4,highlight.size()));
+            songsContainer.addView(section("Suas playlists"));
+            addHorizontalList(songsContainer,AudioLibrary.playlistNames(this));
+
+            songsContainer.addView(section("Recentes"));
+            HorizontalScrollView sc=new HorizontalScrollView(this);
+            sc.setHorizontalScrollBarEnabled(false);
+            LinearLayout line=new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            ArrayList<Track> showing=recently.isEmpty()?new ArrayList<>(tracks):recently;
+            for(int j=0;j<Math.min(showing.size(),8);j++){
+                Track t=showing.get(j);
+                LinearLayout card=new LinearLayout(this);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.addView(cover(t,115),lp(115,115));
+                TextView name=text(t.title,12,TEXT,true);
+                name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                card.addView(name,margins(0,6,0,0,-1,19));
+                TextView art=text(t.artist,11,MUTED,false);
+                art.setSingleLine(true);art.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                card.addView(art);
+                line.addView(card,margins(0,0,15,0,115,-2));
+                card.setOnClickListener(v->playSelection(t));
+            }
+            if(showing.isEmpty()){
+                TextView empty=text("Importe suas músicas para montar os recentes.",13,MUTED,false);
+                line.addView(empty);
+            }
+            sc.addView(line);songsContainer.addView(sc,lp(-1,161));
+
+            LinearLayout heading=new LinearLayout(this);
+            heading.setGravity(Gravity.CENTER_VERTICAL);
+            heading.addView(section("Suas músicas"),new LinearLayout.LayoutParams(0,-2,1));
+            TextView seeAll=text("Ver tudo",12,MUTED,true);
+            seeAll.setOnClickListener(v->{filter="Todas";currentScreen=2;renderTracks();});
+            heading.addView(seeAll);
+            songsContainer.addView(heading);
+            showTrackList(songsContainer,tracks,30);
+        } else if(currentScreen==1){
+            songsContainer.addView(section("Buscar na sua música"));
+            TextView hint=text("Pesquise pelo nome da música ou do artista",13,MUTED,false);
+            songsContainer.addView(hint);
+            showTrackList(songsContainer,visible,300);
+        } else {
+            LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
+            header.addView(section("Sua biblioteca"),new LinearLayout.LayoutParams(0,-2,1));
+            TextView importButton=text("⇩  Importar",13,PURPLE,true);
+            importButton.setGravity(Gravity.CENTER);
+            importButton.setOnClickListener(v->pickAudio());
+            header.addView(importButton,lp(102,46));
+            songsContainer.addView(header);
+            HorizontalScrollView tabs=new HorizontalScrollView(this);
+            tabs.setHorizontalScrollBarEnabled(false);
+            playlistBar=new LinearLayout(this);
+            tabs.addView(playlistBar);
+            songsContainer.addView(tabs,margins(0,0,0,12,-1,40));
+            renderTabs();
+            TextView counter=text(visible.size()+" músicas  •  toque e segure para organizar",12,MUTED,false);
+            songsContainer.addView(counter,margins(0,0,0,12,-1,-2));
+            showTrackList(songsContainer,visible,400);
         }
-        int renderCount=Math.min(visible.size(),400);
-        for(int i=0;i<renderCount;i++){
-            Track track=visible.get(i);
-            LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(7),dp(8),dp(6),dp(8));
-            LinearLayout.LayoutParams rl=lp(-1,69);rl.bottomMargin=dp(2);songsContainer.addView(row,rl);
-            TextView art=text("♫",23,PURPLE,true);art.setGravity(Gravity.CENTER);art.setBackground(round(SURFACE,11));
-            row.addView(art,lp(50,50));
-            LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);info.setPadding(dp(13),0,dp(3),0);
-            TextView songTitle=text(track.title,15,TEXT,true);songTitle.setSingleLine(true);songTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            TextView artist=text(track.artist+"  ·  "+time((int)track.duration),12,MUTED,false);
-            artist.setSingleLine(true);artist.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            info.addView(songTitle);info.addView(artist);row.addView(info,new LinearLayout.LayoutParams(0,-2,1));
-            TextView heart=text(fav.contains(track.uri)?"♥":"♡",25,fav.contains(track.uri)?PURPLE:MUTED,false);
-            heart.setGravity(Gravity.CENTER);row.addView(heart,lp(42,46));
-            heart.setOnClickListener(v->{AudioLibrary.toggleFavorite(this,track.uri);renderTracks();});
-            row.setOnClickListener(v->playSelection(track));
-            row.setOnLongClickListener(v->{showTrackOptions(track);return true;});
+        // Importação disponível mesmo com biblioteca vazia.
+        if(tracks.isEmpty()){
+            TextView importer=chip("＋  Importar músicas do Snaptube ou do celular",true,()->pickAudio());
+            songsContainer.addView(importer,margins(0,10,0,12,-1,51));
         }
-        if(visible.size()>renderCount){TextView more=text("Exibindo as primeiras "+renderCount+" faixas. Use a pesquisa para encontrar outras.",12,MUTED,false);more.setPadding(dp(16),dp(12),dp(16),dp(18));songsContainer.addView(more);}
     }
 
     private void showTrackOptions(Track track){
@@ -278,6 +545,7 @@ public class MainActivity extends Activity {
 
     private void playSelection(Track track){
         if(visible.isEmpty())return;
+        remember(track);
         AudioLibrary.saveQueue(this,visible);
         Intent i=new Intent(this,MusicService.class).setAction(MusicService.ACTION_PLAY);
         i.putExtra("index",visible.indexOf(track));

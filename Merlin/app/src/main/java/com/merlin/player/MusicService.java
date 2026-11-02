@@ -21,6 +21,7 @@ import java.util.Random;
 
 public class MusicService extends Service {
     public static final String ACTION_PLAY = "com.merlin.player.PLAY";
+    public static final String ACTION_PAUSE = "com.merlin.player.PAUSE";
     public static final String ACTION_TOGGLE = "com.merlin.player.TOGGLE";
     public static final String ACTION_NEXT = "com.merlin.player.NEXT";
     public static final String ACTION_PREVIOUS = "com.merlin.player.PREVIOUS";
@@ -77,6 +78,7 @@ public class MusicService extends Service {
                 break;
             }
             case ACTION_TOGGLE: if (playing) pause(); else resume(); break;
+            case ACTION_PAUSE: pause(); break;
             case ACTION_NEXT: next(false); break;
             case ACTION_PREVIOUS: previous(); break;
             case ACTION_SHUFFLE: shuffle = !shuffle; notifyAndBroadcast(); break;

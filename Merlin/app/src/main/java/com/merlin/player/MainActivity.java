@@ -700,12 +700,8 @@ public class MainActivity extends Activity {
                         message += " Jamendo: "+e.getMessage();
                     }
                 }
-                try {
-                    received=OnlineCatalog.search(term);
-                }catch(Exception e){
-                    received=new ArrayList<>();
-                    if(message.isEmpty())message="Não foi possível consultar o catálogo online.";
-                }
+                // Não enviar pesquisas a um catálogo de resultados não reproduzíveis.
+                received=new ArrayList<>();
                 if(received.isEmpty()&&playable.isEmpty()&&message.isEmpty())
                     message="Nenhum resultado encontrado.";
                 final List<OnlineCatalog.Song> response=received;

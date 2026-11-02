@@ -103,7 +103,7 @@ public class MusicService extends Service {
             mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
-            if(AudiusCatalog.canPlay(track)){
+            if(AudiusCatalog.canPlay(track)||JamendoCatalog.canPlay(track)){
                 // Http(s) streaming autorizado, sem navegador ou links externos.
                 mediaPlayer.setDataSource(track.uri);
             }else{

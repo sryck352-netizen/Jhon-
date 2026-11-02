@@ -1,4 +1,4 @@
-name: Merlin 1.6.0 - APK publico
+name: Merlin 1.6.1 - APK publico
 
 on:
   push:
@@ -46,9 +46,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cp Merlin/app/build/outputs/apk/debug/app-debug.apk Merlin.apk
-          TAG=merlin-v1.6.0
+          TAG=merlin-v1.6.1
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" Merlin.apk --clobber
           else
-            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.6.0 - nova busca e player offline/online" --notes "Merlin 1.6: tela Busca e Biblioteca renovadas, opcoes de Criar em painel roxo, streaming Audius e Jamendo (quando configurado), arquivos do Snaptube via seletor Android, playlists e Match com Firebase configurado. APK debug, nao testado fisicamente."
+            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.6.1 - nova busca e player offline/online" --notes "Merlin 1.6.1: tela Busca e Biblioteca renovadas, opcoes de Criar em painel roxo, streaming Audius e Jamendo (quando configurado), arquivos do Snaptube via seletor Android, playlists e Match com Firebase configurado. APK debug, nao testado fisicamente."
           fi

@@ -1,4 +1,4 @@
-name: Merlin 1.4 - APK publico
+name: Merlin 1.4.1 - APK publico
 
 on:
   push:
@@ -40,7 +40,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cp Merlin/app/build/outputs/apk/debug/app-debug.apk Merlin.apk
-          TAG=merlin-v1.4.0
+          TAG=merlin-v1.4.1
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" Merlin.apk --clobber
           else

@@ -156,4 +156,30 @@ public class AudioLibrary {
             p.edit().putString("playlists",obj.toString()).apply();
         } catch(Exception ignored) {}
     }
+    /** Renomeia a playlist e conserva suas músicas; falha em nomes duplicados. */
+    public static synchronized boolean renamePlaylist(Context ctx,String oldName,String newName){
+        if(oldName==null||newName==null)return false;
+        newName=newName.trim();
+        if(newName.length()<1||newName.length()>60||newName.equals("Todas")||newName.equals("Curtidas"))return false;
+        SharedPreferences prefs=ctx.getSharedPreferences(PREFS,0);
+        try{
+            JSONObject obj=new JSONObject(prefs.getString("playlists","{}"));
+            if(!obj.has(oldName)||(!oldName.equals(newName)&&obj.has(newName)))return false;
+            if(oldName.equals(newName))return true;
+            JSONArray songs=obj.getJSONArray(oldName);
+            obj.remove(oldName);obj.put(newName,songs);
+            return prefs.edit().putString("playlists",obj.toString()).commit();
+        }catch(Exception ignored){return false;}
+    }
+    /** Exclui somente a playlist, nunca os arquivos de áudio. */
+    public static synchronized boolean deletePlaylist(Context ctx,String name){
+        SharedPreferences prefs=ctx.getSharedPreferences(PREFS,0);
+        try{
+            JSONObject obj=new JSONObject(prefs.getString("playlists","{}"));
+            if(!obj.has(name))return false;
+            obj.remove(name);
+            return prefs.edit().putString("playlists",obj.toString()).commit();
+        }catch(Exception ignored){return false;}
+    }
+
 }

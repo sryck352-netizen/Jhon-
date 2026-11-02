@@ -269,8 +269,19 @@ public final class CloudPlaylists {
             if(!roomId.equals(inv.optString("room"))||
                inv.optLong("expires",0)<System.currentTimeMillis())
                 throw new Exception("Convite inválido ou expirado.");
+            String assignedSlot="";
+            for(int slot=1;slot<=10;slot++){
+                try{
+                    String selected=Integer.toString(slot);
+                    JSONObject claim=new JSONObject().put("uid",uid).put("invite",code);
+                    db("rooms/"+roomId+"/slots/"+selected,"PUT",claim);
+                    assignedSlot=selected;break;
+                }catch(Exception occupied){ /* Vaga ocupada por outro participante. */ }
+            }
+            if(assignedSlot.isEmpty())throw new Exception("Esta sala está cheia (10 convidados) ou o convite não é válido.");
             JSONObject member=new JSONObject().put("name",nickname())
-                .put("joinedAt",System.currentTimeMillis()).put("invite",code);
+                .put("joinedAt",System.currentTimeMillis()).put("invite",code)
+                .put("slot",assignedSlot);
             db("rooms/"+roomId+"/members/"+uid,"PUT",member);
             remember(roomId);
             return new Room(roomId,getObj("rooms/"+roomId));
@@ -290,7 +301,16 @@ public final class CloudPlaylists {
         run(()->{
             auth();Room room=new Room(roomId,getObj("rooms/"+roomId));
             if(uid.equals(room.owner))delete("rooms/"+roomId);
-            else delete("rooms/"+roomId+"/members/"+uid);
+            else {
+                JSONObject raw=getObj("rooms/"+roomId);
+                JSONObject myMembers=raw.optJSONObject("members");
+                JSONObject member=myMembers==null?null:myMembers.optJSONObject(uid);
+                if(member!=null){
+                    String slot=member.optString("slot","");
+                    if(slot.matches("([1-9]|10)"))delete("rooms/"+roomId+"/slots/"+slot);
+                }
+                delete("rooms/"+roomId+"/members/"+uid);
+            }
             forget(roomId);return true;
         },callback);
     }

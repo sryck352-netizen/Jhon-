@@ -8,7 +8,7 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -31,3 +31,12 @@ jobs:
         with:
           name: Merlin-Android
           path: Merlin.apk
+
+      - name: Disponibilizar APK para download direto
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create merlin-v1.0.0 Merlin.apk \
+            --title "Merlin 1.0 — Android" \
+            --notes "Merlin 1.0: player musical offline para Android, com importação de arquivos, playlists, favoritos e reprodução em segundo plano." \
+            --target "$GITHUB_SHA"

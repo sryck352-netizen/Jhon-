@@ -316,11 +316,29 @@ public final class CloudPlaylists {
             forget(roomId);return true;
         },callback);
     }
+    public static String audiusId(String streamUrl){
+        if(streamUrl==null)return "";
+        try{
+            Uri u=Uri.parse(streamUrl);
+            if(!"https".equals(u.getScheme())||!"api.audius.co".equals(u.getHost()))return "";
+            List<String> path=u.getPathSegments();
+            if(path.size()!=4||!"v1".equals(path.get(0))||!"tracks".equals(path.get(1))||!"stream".equals(path.get(3)))return "";
+            String id=path.get(2);
+            return id.matches("[A-Za-z0-9_-]{3,90}")?id:"";
+        }catch(Exception e){return "";}
+    }
+    public static Track audiusTrack(String id,String title,String artist){
+        if(id==null||!id.matches("[A-Za-z0-9_-]{3,90}"))return null;
+        return new Track("https://api.audius.co/v1/tracks/"+id+"/stream?app_name=Merlin",
+            title,artist,"Audius",0);
+    }
     public void putSong(String roomId,Track track,Done<Boolean> callback){
         run(()->{
             JSONObject song=new JSONObject().put("title",track.title)
                 .put("artist",track.artist).put("album",track.album)
                 .put("addedBy",uid.isEmpty()?"":uid).put("addedAt",System.currentTimeMillis());
+            String remoteId=audiusId(track.uri);
+            if(!remoteId.isEmpty())song.put("audiusId",remoteId);
             String key=fingerprint(track.title,track.artist);
             db("rooms/"+roomId+"/tracks/"+key,"PUT",song);return true;
         },callback);
@@ -336,7 +354,10 @@ public final class CloudPlaylists {
             for(Track track:favorites){
                 if(count>=50)break;
                 String hash=fingerprint(track.title,track.artist);
-                payload.put(hash,new JSONObject().put("title",track.title).put("artist",track.artist));
+                JSONObject value=new JSONObject().put("title",track.title).put("artist",track.artist);
+                String remoteId=audiusId(track.uri);
+                if(!remoteId.isEmpty())value.put("audiusId",remoteId);
+                payload.put(hash,value);
                 count++;
             }
             db("rooms/"+roomId+"/tastes/"+uid,"PUT",payload);
@@ -352,7 +373,7 @@ public final class CloudPlaylists {
     }
     public static List<JSONObject> recommendations(Room room,int max){
         class Candidate {
-            String hash,title,artist;
+            String hash,title,artist,audiusId="";
             Set<String> fans=new HashSet<>();
         }
         HashMap<String,Candidate> pool=new HashMap<>();
@@ -371,6 +392,7 @@ public final class CloudPlaylists {
                     c=new Candidate();c.hash=hash;c.title=item.optString("title");
                     c.artist=item.optString("artist");pool.put(hash,c);
                 }
+                if(c.audiusId.isEmpty())c.audiusId=item.optString("audiusId","");
                 c.fans.add(user);
             }
         }
@@ -394,7 +416,8 @@ public final class CloudPlaylists {
             if(used>=3)continue;
             usedArtists.put(c.artist,used+1);
             try{result.add(new JSONObject().put("title",c.title).put("artist",c.artist)
-                .put("votes",c.fans.size()).put("key",c.hash));}catch(Exception ignored){}
+                .put("votes",c.fans.size()).put("key",c.hash)
+                .put("audiusId",c.audiusId));}catch(Exception ignored){}
         }
         return result;
     }
@@ -417,11 +440,14 @@ public final class CloudPlaylists {
             for(JSONObject song:proposed){
                 String key=song.optString("key");
                 if(room.songs.has(key))continue;
-                db("rooms/"+roomId+"/tracks/"+key,"PUT",new JSONObject()
+                JSONObject entry=new JSONObject()
                     .put("title",song.optString("title")).put("artist",song.optString("artist"))
                     .put("album","Match Merlin").put("addedBy",uid)
                     .put("autoMatch",true)
-                    .put("addedAt",System.currentTimeMillis()));
+                    .put("addedAt",System.currentTimeMillis());
+                String remoteId=song.optString("audiusId","");
+                if(remoteId.matches("[A-Za-z0-9_-]{3,90}"))entry.put("audiusId",remoteId);
+                db("rooms/"+roomId+"/tracks/"+key,"PUT",entry);
             }
             return proposed.size();
         },callback);

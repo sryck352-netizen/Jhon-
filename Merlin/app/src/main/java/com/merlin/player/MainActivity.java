@@ -589,6 +589,12 @@ public class MainActivity extends Activity {
         FrameLayout art=new FrameLayout(this);art.setBackground(gradient());
         TextView mark=text("✧\n♫",90,0xFFEDE5FF,true);mark.setGravity(Gravity.CENTER);
         art.addView(mark,new FrameLayout.LayoutParams(-1,-1));
+        for(Track selected:tracks){
+            if(selected.uri.equals(MusicService.currentUri)){
+                art.addView(cover(selected,300),new FrameLayout.LayoutParams(-1,-1));
+                break;
+            }
+        }
         LinearLayout.LayoutParams al=new LinearLayout.LayoutParams(-1,0,1);al.setMargins(0,dp(23),0,dp(28));root.addView(art,al);
         LinearLayout titleRow=new LinearLayout(this);titleRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout nameBox=new LinearLayout(this);nameBox.setOrientation(LinearLayout.VERTICAL);

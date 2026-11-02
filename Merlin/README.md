@@ -1,31 +1,41 @@
-# Merlin — tocador de música para Android
+# MERLIN — Player Android (versão 1.6.1)
 
-Aplicativo Android em Java, com visual escuro e destaque roxo, focado em música offline. É compatível com arquivos de áudio acessíveis no armazenamento do celular, incluindo aqueles baixados pelo Snaptube, **sem depender de uma API não oficial do Snaptube**.
+O Merlin permanece no projeto Android Java original. Os dados existentes ficam nas mesmas chaves de SharedPreferences e o applicationId continua **com.merlin.player**.
 
-## Funcionalidades
+## O que funciona pelo código
+- Biblioteca local: arquivos que o Android identifica no armazenamento, com importação manual de áudio (e MP4 com faixa de áudio). O Snaptube é uma fonte de arquivos locais, **não um catálogo de streaming**.
+- Reprodução local/segundo plano, MediaSession, avançar/voltar, fila, aleatório e repetição.
+- Busca por músicas locais e música online via **Audius** (catálogo aberto) e, com client_id configurado, **Jamendo**.
+- Somente músicas com endpoint de streaming autorizado aparecem como resultados reproduzíveis. Músicas comerciais indisponíveis não são prometidas.
+- Playlists e favoritos locais. Backup de biblioteca nas configurações.
+- Playlists colaborativas e Match implementados com backend Firebase opcional, confirmação de ações e convites por link/código. Sem Firebase configurado não sincronizam.
+- Tema escuro com destaque violeta, painel Criar, capas e miniplayer.
 
-- Biblioteca de músicas do aparelho com busca por faixa e artista.
-- Importar várias músicas (MP3, AAC, M4A, FLAC, OGG e outros formatos que o Android reproduzir) pelo seletor de arquivos.
-- Permissões modernas do Android 13+ (`READ_MEDIA_AUDIO`).
-- Reprodução em segundo plano, com a tela bloqueada, e controles de mídia do Android.
-- Playlists personalizadas: toque em `+ Playlist` para criar e **segure uma faixa** para incluí-la ou removê-la de uma playlist.
-- Favoritos, modo aleatório, repetir todas ou repetir uma, avanço e retrocesso, e barra para avançar na música.
-- Downloads do Snaptube que o Android indexar são exibidos automaticamente. Se não aparecerem, use **Importar** para escolher os arquivos.
+## Configuração Jamendo (opcional, mas recomendada)
+1. Crie uma conta de desenvolvedor em https://developer.jamendo.com/ e obtenha seu client_id para a API de leitura (o ID de exemplo na documentação é **só para testes**).
+2. GitHub > Settings > Secrets and variables > Actions > Variables: crie `MERLIN_JAMENDO_CLIENT_ID` com o seu client_id.
+3. Execute novamente `.github/workflows/merlin-build-public.yml` (workflow na branch main).
+4. A API do Jamendo autoriza busca e reprodução de obras disponíveis nela. **Não** garante Taylor Swift nem outras faixas que não existam naquele catálogo.
 
-## Limite da integração
+O Audius oferece acesso de leitura sem autenticação na maioria dos endpoints, mas pode impor limites e a disponibilidade das faixas depende da API.
 
-O Merlin toca músicas baixadas, próprias ou licenciadas, que estejam acessíveis ao usuário. Não transmite o catálogo interno online do Snaptube nem faz download de serviços protegidos: isso exigiria integração oficial ou acesso autorizado a uma fonte de áudio.
+## Configuração da colaboração e Match
+Veja [FIREBASE-SETUP.md](FIREBASE-SETUP.md). É necessário configurar o Firebase Realtime Database + Authentication, aplicar as regras de segurança e criar as variáveis do GitHub.
+Os áudios **não são compartilhados**: sincronizam-se metadados de títulos e artistas. Cada pessoa precisa possuir sua própria cópia da música ou o streaming autorizado.
 
-## Como gerar o APK
+## Importar músicas do Snaptube
+Use **Biblioteca > Importar**. Escolha os arquivos de áudio ou MP4 com áudio no seletor Android. Não é necessário conceder acesso ao Snaptube nem suas credenciais.
 
-No computador, instale Java 17, Android SDK 35 e Gradle 8.10.2. Na pasta do projeto, rode:
+## Desenvolvimento e testes
+- Java 17, Gradle 8.10.2, Android SDK 35.
+- `gradle -p Merlin testDebugUnitTest assembleDebug`
+- GitHub Actions executa testes, compila o APK, verifica a assinatura e publica um arquivo de teste na seção Releases.
+- **Os testes automáticos não substituem testes reais em um Galaxy A15**, especialmente para streaming pela internet e convites entre dispositivos.
 
-```bash
-gradle assembleDebug
-```
+## IMPORTANTE: Atualização sem perder dados
+Um APK só instala por cima do aplicativo atual quando ambos usam a mesma chave de assinatura e um versionCode maior. Os APKs de debug gerados em máquinas diferentes podem ter assinaturas incompatíveis. **Antes de tentar atualizar**, faça backup no Merlin em Configurações > Exportar backup. Se o Android exigir desinstalar, não faça isso antes de salvar o backup e confirmar que consegue restaurá-lo. Para atualizações futuras sem perda de dados, é preciso configurar uma chave de assinatura persistente e protegida para o workflow.
 
-O APK será gerado em `app/build/outputs/apk/debug/app-debug.apk`.
-
-Também existe um workflow de GitHub Actions em `.github/workflows/build-apk.yml` para compilar automaticamente o APK ao enviar o código para uma branch chamada `merlin`.
-
-Instale apenas seus próprios APKs compilados em ambientes confiáveis. O APK de debug é adequado para testes, não para publicação na Play Store.
+## Limites
+- O Merlin não desbloqueia Spotify Premium, não retira anúncios do YouTube e não reproduz o áudio isolado de vídeos do YouTube.
+- Sem anúncios próprios inseridos no Merlin; outras plataformas mantêm suas próprias regras.
+- Busca online e reprodução precisam de rede, dependem do serviço e podem falhar. O app deve mostrar erro em vez de simular que a faixa está tocando.

@@ -50,7 +50,7 @@ public class AudioLibrary {
             JSONArray online=new JSONArray(ctx.getSharedPreferences(PREFS,0).getString("online_library","[]"));
             for(int i=0;i<online.length();i++){
                 Track remote=Track.fromJson(online.getJSONObject(i));
-                if(AudiusCatalog.canPlay(remote)&&seen.add(remote.uri))tracks.add(remote);
+                if((AudiusCatalog.canPlay(remote)||JamendoCatalog.canPlay(remote))&&seen.add(remote.uri))tracks.add(remote);
             }
         }catch(Exception ignored){}
         tracks.sort(Comparator.comparing(t -> t.title.toLowerCase(java.util.Locale.getDefault())));
@@ -191,7 +191,7 @@ public class AudioLibrary {
     }
 
     public static synchronized void rememberOnline(Context ctx,Track track){
-        if(!AudiusCatalog.canPlay(track))return;
+        if(!AudiusCatalog.canPlay(track)&&!JamendoCatalog.canPlay(track))return;
         SharedPreferences p=ctx.getSharedPreferences(PREFS,0);
         try{
             JSONArray prev=new JSONArray(p.getString("online_library","[]"));

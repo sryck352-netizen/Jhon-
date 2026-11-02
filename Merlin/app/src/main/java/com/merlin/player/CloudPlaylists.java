@@ -10,6 +10,8 @@ import java.net.URL;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -405,5 +407,77 @@ public final class CloudPlaylists {
             return proposed.size();
         },callback);
     }
+
+    /**
+     * Escuta mudanças do Firebase em tempo real via Server Sent Events.
+     * Um listener é mantido somente enquanto a playlist estiver visível.
+     * O chamador deve encerrar a assinatura ao fechar a tela.
+     */
+    public final class Subscription {
+        private volatile boolean running=true;
+        private volatile HttpURLConnection current;
+        private Thread thread;
+        public void cancel(){
+            running=false;
+            HttpURLConnection connection=current;
+            if(connection!=null)connection.disconnect();
+            if(thread!=null)thread.interrupt();
+        }
+    }
+    public Subscription listen(String roomId,Done<Boolean> updates){
+        Subscription sub=new Subscription();
+        if(!roomId.matches("[a-f0-9]{32}")){
+            main.post(()->updates.complete(false,"Identificador inválido"));return sub;
+        }
+        sub.thread=new Thread(()->{
+            long retry=1500;
+            while(sub.running&&!Thread.currentThread().isInterrupted()){
+                HttpURLConnection conn=null;
+                try{
+                    auth();
+                    String endpoint=database.replaceAll("/+$","")+"/rooms/"+roomId+".json?auth="+urlEncode(idToken);
+                    conn=(HttpURLConnection)new URL(endpoint).openConnection();
+                    sub.current=conn;
+                    conn.setRequestProperty("Accept","text/event-stream");
+                    conn.setRequestProperty("Cache-Control","no-cache");
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(45000);
+                    conn.setInstanceFollowRedirects(true);
+                    int status=conn.getResponseCode();
+                    if(status!=200)throw new Exception("Erro "+status+" ao sincronizar.");
+                    retry=1500;
+                    try(BufferedReader reader=new BufferedReader(new InputStreamReader(conn.getInputStream(),StandardCharsets.UTF_8))){
+                        String line;String event="";StringBuilder data=new StringBuilder();
+                        while(sub.running && (line=reader.readLine())!=null){
+                            if(line.startsWith("event:")) event=line.substring(6).trim();
+                            else if(line.startsWith("data:"))data.append(line.substring(5).trim());
+                            else if(line.isEmpty()){
+                                if(event.equals("auth_revoked")){
+                                    tokenExpires=0;break;
+                                }
+                                if(event.equals("put")||event.equals("patch")){
+                                    final String currentEvent=event;
+                                    main.post(()->{if(sub.running)updates.complete(true,null);});
+                                }
+                                event="";data.setLength(0);
+                            }
+                        }
+                    }
+                }catch(Exception ignored){
+                    // A UI mantém polling como fallback nos momentos sem SSE.
+                }finally{
+                    if(conn!=null)conn.disconnect();
+                    sub.current=null;
+                }
+                if(!sub.running)break;
+                try{Thread.sleep(retry);}catch(InterruptedException e){break;}
+                retry=Math.min(15000,retry*2);
+            }
+        },"MerlinRoomRealtime");
+        sub.thread.setDaemon(true);
+        sub.thread.start();
+        return sub;
+    }
+
     public void close(){io.shutdown();}
 }

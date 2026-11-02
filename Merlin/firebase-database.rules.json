@@ -1,0 +1,41 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".read": "auth != null && data.child('members').child(auth.uid).exists()",
+        ".write": "auth != null && data.exists() && !newData.exists() && data.child('meta').child('owner').val() === auth.uid",
+        "meta": {
+          ".write": "auth != null && ((!data.exists() && newData.child('owner').val() === auth.uid && (newData.child('type').val() === 'match' || newData.child('type').val() === 'collab')) || (data.exists() && data.child('owner').val() === auth.uid && newData.child('owner').val() === auth.uid))",
+          ".validate": "newData.hasChildren(['name','owner','type']) && newData.child('name').isString() && (newData.child('type').val() === 'match' || newData.child('type').val() === 'collab')"
+        },
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && ((!data.exists() && root.child('rooms').child($room).child('meta').child('owner').val() === auth.uid) || (data.exists() && !newData.exists()) || (!data.exists() && newData.child('invite').isString() && root.child('invites').child(newData.child('invite').val()).child('room').val() === $room && root.child('invites').child(newData.child('invite').val()).child('expires').val() > now && root.child('rooms').child($room).child('members').childrenCount() < 11))",
+            ".validate": "newData.hasChildren(['name','joinedAt']) && newData.child('name').isString()"
+          }
+        },
+        "tracks": {
+          "$track": {
+            ".write": "auth != null && root.child('rooms').child($room).child('members').child(auth.uid).exists()",
+            ".validate": "newData.hasChildren(['title','artist']) && newData.child('title').isString() && newData.child('artist').isString()"
+          }
+        },
+        "tastes": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('rooms').child($room).child('members').child(auth.uid).exists()",
+            ".validate": "newData.childrenCount() <= 50"
+          }
+        }
+      }
+    },
+    "invites": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('createdBy').val() === auth.uid && root.child('rooms').child(newData.child('room').val()).child('meta').child('owner').val() === auth.uid) || (data.exists() && data.child('createdBy').val() === auth.uid))",
+        ".validate": "newData.hasChildren(['room','createdBy','expires']) && newData.child('expires').isNumber() && newData.child('expires').val() > now && newData.child('expires').val() <= now + 604800000"
+      }
+    }
+  }
+}

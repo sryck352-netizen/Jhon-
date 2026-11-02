@@ -1119,7 +1119,11 @@ public class MainActivity extends Activity {
                     .setItems(new String[]{"Reproduzir (se disponível neste celular)","Remover da playlist"},(d,choice)->{
                         if(choice==0){
                             Track local=findTrack(songTitle,artist);
-                            if(local==null){toast("Baixe ou importe esta música no seu celular para tocar");return;}
+                            if(local==null){
+                                Track remote=CloudPlaylists.audiusTrack(item.optString("audiusId",""),songTitle,artist);
+                                if(remote!=null){playOnline(remote);return;}
+                                toast("Esta música precisa estar no celular, ou ter uma versão autorizada no Audius.");return;
+                            }
                             filter="Todas";visible=new ArrayList<>(tracks);
                             playSelection(local);
                         }else{

@@ -46,6 +46,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.net.URLEncoder;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -56,6 +59,7 @@ public class MainActivity extends Activity {
     private final int TEXT = 0xFFF9F9F9;
     private final int MUTED = 0xFFAAAAAA;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService onlineWorker = Executors.newFixedThreadPool(3);
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Track> tracks = new ArrayList<>();
     private List<Track> visible = new ArrayList<>();
@@ -67,6 +71,13 @@ public class MainActivity extends Activity {
     private SeekBar miniSeek;
     private String search = "", filter = "Todas";
     private Dialog playerDialog;
+    private List<OnlineCatalog.Song> onlineResults = new ArrayList<>();
+    private String onlineMessage="Digite pelo menos 2 letras para pesquisar na internet.";
+    private boolean onlineLoading=false;
+    private long onlineRequest=0;
+    private Runnable pendingSearch;
+    private Runnable timerStop;
+    private final LruCache<String,Bitmap> onlineImages=new LruCache<>(120);
     private final BroadcastReceiver playbackReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { updateMini(); }
     };
@@ -133,6 +144,7 @@ public class MainActivity extends Activity {
         GradientDrawable bg=round(0xFF57348C,99);
         badge.setBackground(bg);
         top.addView(badge,lp(39,39));
+        badge.setOnClickListener(v->openProfile());
         top.addView(chip("Tudo",true,()->{filter="Todas";currentScreen=0;renderTracks();}),margins(9,0,0,0, -2,38));
         top.addView(chip("Música",false,()->{filter="Todas";currentScreen=2;renderTracks();}),margins(8,0,0,0,-2,38));
         top.addView(chip("Curtidas",false,()->{filter="Curtidas";currentScreen=2;renderTracks();}),margins(8,0,0,0,-2,38));
@@ -152,7 +164,9 @@ public class MainActivity extends Activity {
         searchField.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s,int start,int count,int after){}
             @Override public void onTextChanged(CharSequence s,int start,int before,int count){
-                search=s.toString().toLowerCase(Locale.ROOT);renderTracks();
+                search=s.toString().toLowerCase(Locale.ROOT).trim();
+                if(currentScreen==1) scheduleOnlineSearch();
+                renderTracks();
             }
             @Override public void afterTextChanged(Editable e){}
         });
@@ -502,10 +516,23 @@ public class MainActivity extends Activity {
             songsContainer.addView(heading);
             showTrackList(songsContainer,tracks,30);
         } else if(currentScreen==1){
-            songsContainer.addView(section("Buscar na sua música"));
-            TextView hint=text("Pesquise pelo nome da música ou do artista",13,MUTED,false);
+            songsContainer.addView(section("Buscar no Merlin"));
+            TextView hint=text("Músicas baixadas no seu celular",13,MUTED,false);
             songsContainer.addView(hint);
-            showTrackList(songsContainer,visible,300);
+            showTrackList(songsContainer,visible,50);
+            songsContainer.addView(section("Resultados na internet"));
+            TextView source=text("Catálogo musical público • a reprodução online acontece no serviço de origem",12,MUTED,false);
+            source.setPadding(0,0,0,dp(10));
+            songsContainer.addView(source);
+            if(onlineLoading){
+                TextView loading=text("Pesquisando músicas e artistas...",13,MUTED,false);
+                songsContainer.addView(loading,margins(0,8,0,12,-1,38));
+            }else if(onlineResults.isEmpty()){
+                TextView empty=text(onlineMessage,13,MUTED,false);
+                songsContainer.addView(empty,margins(0,8,0,12,-1,45));
+            }else{
+                for(OnlineCatalog.Song song:onlineResults)onlineRow(songsContainer,song);
+            }
         } else {
             LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
             header.addView(section("Sua biblioteca"),new LinearLayout.LayoutParams(0,-2,1));
@@ -529,6 +556,153 @@ public class MainActivity extends Activity {
             TextView importer=chip("＋  Importar músicas do Snaptube ou do celular",true,()->pickAudio());
             songsContainer.addView(importer,margins(0,10,0,12,-1,51));
         }
+    }
+
+
+    private void scheduleOnlineSearch(){
+        onlineRequest++;
+        long request=onlineRequest;
+        if(pendingSearch!=null)handler.removeCallbacks(pendingSearch);
+        if(search.length()<2){
+            onlineLoading=false;onlineResults=new ArrayList<>();
+            onlineMessage="Pesquise um título, álbum ou artista.";return;
+        }
+        if(getSharedPreferences("merlin_settings",0).getBoolean("offline_only",false)){
+            onlineLoading=false;onlineResults=new ArrayList<>();
+            onlineMessage="Busca online desativada no modo offline.";return;
+        }
+        onlineLoading=true;
+        String term=search;
+        pendingSearch=()->{
+            onlineWorker.execute(()->{
+                List<OnlineCatalog.Song> received;
+                String message;
+                try {
+                    received=OnlineCatalog.search(term);
+                    message=received.isEmpty()?"Nenhum resultado encontrado.":"";
+                }catch(Exception e){
+                    received=new ArrayList<>();
+                    message="Não consegui acessar o catálogo. Verifique sua internet.";
+                }
+                final List<OnlineCatalog.Song> response=received;
+                final String status=message;
+                handler.post(()->{
+                    if(request!=onlineRequest || currentScreen!=1)return;
+                    onlineResults=response;onlineMessage=status;
+                    onlineLoading=false;renderTracks();
+                });
+            });
+        };
+        handler.postDelayed(pendingSearch,370);
+    }
+    private void onlineRow(LinearLayout list, OnlineCatalog.Song song){
+        LinearLayout row=new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout art=new FrameLayout(this);
+        art.setBackground(round(0xFF373737,5));
+        ImageView image=new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        art.addView(image,new FrameLayout.LayoutParams(-1,-1));
+        Bitmap memory=onlineImages.get(song.art);
+        if(memory!=null)image.setImageBitmap(memory);
+        else if(song.art.startsWith("https://")){
+            onlineWorker.execute(()->{
+                Bitmap b=OnlineCatalog.thumbnail(song.art);
+                if(b!=null){
+                    synchronized(onlineImages){onlineImages.put(song.art,b);}
+                    handler.post(()->image.setImageBitmap(b));
+                }
+            });
+        }
+        row.addView(art,lp(55,55));
+        LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(12),0,dp(6),0);
+        TextView title=text(song.title,15,TEXT,false);
+        title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView artist=text(song.artist+" • "+song.album,12,MUTED,false);
+        artist.setSingleLine(true);artist.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        labels.addView(title);labels.addView(artist);
+        row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        TextView go=text("↗",21,PURPLE,true);go.setGravity(Gravity.CENTER);
+        row.addView(go,lp(39,50));
+        row.setOnClickListener(v->openSongChoices(song));
+        list.addView(row,margins(0,0,0,9,-1,61));
+    }
+    private void openSongChoices(OnlineCatalog.Song song){
+        final String query=song.title+" "+song.artist;
+        new AlertDialog.Builder(this).setTitle(song.title)
+            .setMessage(song.artist+"\n\nO Merlin encontrou esta música na internet. Para ouvi-la online, é necessário um serviço de reprodução autorizado.")
+            .setItems(new String[]{"Buscar no Spotify","Abrir no Apple Music / iTunes","Copiar nome da música"},(dialog,option)->{
+                try{
+                    if(option==0){
+                        openExternal("https://open.spotify.com/search/"+Uri.encode(query));
+                    }else if(option==1){
+                        if(song.storeUrl.startsWith("https://"))openExternal(song.storeUrl);
+                        else toast("Link não disponível");
+                    }else{
+                        ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE))
+                            .setPrimaryClip(android.content.ClipData.newPlainText("Música",query));
+                        toast("Música copiada");
+                    }
+                }catch(Exception e){toast("Não encontrei um aplicativo para abrir o link");}
+            }).setNegativeButton("Fechar",null).show();
+    }
+    private void openExternal(String uri){
+        startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(uri)));
+    }
+    private void openProfile(){
+        ScrollView scroll=new ScrollView(this);
+        LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(22),dp(24),dp(22),dp(28));body.setBackgroundColor(0xFF202020);
+        TextView heading=text("Merlin   •   Perfil",25,TEXT,true);body.addView(heading,lp(-1,55));
+        body.addView(text("Sua música, do seu jeito.",13,MUTED,false));
+        body.addView(section("Sua atividade"));
+        TextView recent=action("◷   Músicas recentes",15,false);
+        body.addView(recent,margins(0,0,0,9,-1,52));
+        recent.setOnClickListener(v->{
+            ArrayList<Track> tracksRecent=getRecent();
+            StringBuilder lines=new StringBuilder();
+            for(Track t:tracksRecent)lines.append("• ").append(t.title).append(" — ").append(t.artist).append("\n");
+            new AlertDialog.Builder(this).setTitle("Recentes")
+                .setMessage(lines.length()==0?"Você ainda não ouviu nenhuma música.":lines.toString())
+                .setPositiveButton("Fechar",null).show();
+        });
+        TextView settings=action("⚙   Configurações e privacidade",15,false);
+        body.addView(settings,margins(0,0,0,9,-1,52));
+        settings.setOnClickListener(v->openSettings());
+        TextView about=action("ⓘ   Sobre o Merlin",15,false);
+        body.addView(about,margins(0,0,0,9,-1,52));
+        about.setOnClickListener(v->new AlertDialog.Builder(this)
+            .setTitle("Merlin 1.2")
+            .setMessage("Player musical local e busca de metadados na internet. Sem assinatura, sem anúncios próprios. Não possui acesso ao áudio protegido do Spotify.")
+            .setPositiveButton("OK",null).show());
+        scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(this).setView(scroll).setPositiveButton("Voltar",null).create();
+        dialog.show();
+    }
+    private void openSettings(){
+        android.content.SharedPreferences pref=getSharedPreferences("merlin_settings",0);
+        boolean offline=pref.getBoolean("offline_only",false);
+        boolean autoload=pref.getBoolean("auto_scan",true);
+        String[] options={
+            "Somente offline (desativa a busca na internet)",
+            "Examinar automaticamente a biblioteca local",
+            "Importar músicas baixadas",
+            "Abrir configurações de áudio do Android",
+            "Privacidade: dados locais, nenhuma conta necessária"
+        };
+        boolean[] checked={offline,autoload,false,false,false};
+        new AlertDialog.Builder(this).setTitle("Configurações do Merlin")
+            .setMultiChoiceItems(options,checked,(d,index,checkedNow)->{
+                if(index==0){pref.edit().putBoolean("offline_only",checkedNow).apply();scheduleOnlineSearch();renderTracks();}
+                if(index==1)pref.edit().putBoolean("auto_scan",checkedNow).apply();
+                if(index==2){pickAudio();}
+                if(index==3){
+                    try{startActivity(new Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL));}
+                    catch(Exception e){toast("Seu Android não disponibilizou um equalizador");}
+                }
+            })
+            .setPositiveButton("Concluído",null).show();
     }
 
     private void showTrackOptions(Track track){
@@ -636,7 +810,20 @@ public class MainActivity extends Activity {
         prev.setOnClickListener(v->command(MusicService.ACTION_PREVIOUS));
         toggle.setOnClickListener(v->command(MusicService.ACTION_TOGGLE));
         next.setOnClickListener(v->command(MusicService.ACTION_NEXT));
-        TextView footer=text("MERLIN  •  MÚSICAS OFFLINE",12,MUTED,true);footer.setGravity(Gravity.CENTER);
+        LinearLayout extraControls=new LinearLayout(this);extraControls.setGravity(Gravity.CENTER);
+        TextView lyrics=action("♫  Letras",13,false);
+        TextView share=action("⇧  Compartilhar",13,false);
+        TextView sleep=action("◷  Timer",13,false);
+        extraControls.addView(lyrics,new LinearLayout.LayoutParams(0,dp(51),1));
+        LinearLayout.LayoutParams spread=new LinearLayout.LayoutParams(0,dp(51),1);
+        spread.setMargins(dp(6),0,dp(6),0);
+        extraControls.addView(share,spread);
+        extraControls.addView(sleep,new LinearLayout.LayoutParams(0,dp(51),1));
+        root.addView(extraControls,margins(0,11,0,0,-1,51));
+        lyrics.setOnClickListener(v->openLyrics());
+        share.setOnClickListener(v->shareCurrent());
+        sleep.setOnClickListener(v->showSleepTimer());
+        TextView footer=text("MERLIN  •  REPRODUÇÃO LOCAL",12,MUTED,true);footer.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams fl=lp(-1,42);fl.topMargin=dp(14);root.addView(footer,fl);
         d.setContentView(root);Window w=d.getWindow();
         if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setLayout(-1,-1);}
@@ -660,6 +847,43 @@ public class MainActivity extends Activity {
         };handler.post(sync);
     }
 
+
+    private void openLyrics(){
+        String key=MusicService.currentUri;
+        String lyrics=getSharedPreferences("merlin_lyrics",0).getString(key,"");
+        new AlertDialog.Builder(this).setTitle("Letras • "+MusicService.currentTitle)
+            .setMessage(lyrics.isEmpty()
+                ?"Importe um arquivo de letras .lrc ou .txt dessa música para acompanhar a letra. O Merlin não baixa letras protegidas sem autorização."
+                :lyrics.replaceAll("(?m)^\\[[0-9:.]+\\]","").trim())
+            .setPositiveButton("Importar letra",(d,w)->{
+                Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("text/*");
+                startActivityForResult(intent,101);
+            }).setNegativeButton("Fechar",null).show();
+    }
+    private void shareCurrent(){
+        if(MusicService.currentUri.isEmpty()){toast("Selecione uma música");return;}
+        Intent share=new Intent(Intent.ACTION_SEND);
+        share.setType("audio/*");
+        share.putExtra(Intent.EXTRA_STREAM,Uri.parse(MusicService.currentUri));
+        share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try{startActivity(Intent.createChooser(share,"Compartilhar música"));}
+        catch(Exception e){toast("Esse arquivo não pode ser compartilhado");}
+    }
+    private void showSleepTimer(){
+        String[] times={"5 minutos","15 minutos","30 minutos","60 minutos","Cancelar timer"};
+        new AlertDialog.Builder(this).setTitle("Parar música automaticamente")
+            .setItems(times,(d,index)->{
+                if(timerStop!=null)handler.removeCallbacks(timerStop);
+                timerStop=null;
+                if(index==4){toast("Timer cancelado");return;}
+                int[] mins={5,15,30,60};
+                timerStop=()->command(MusicService.ACTION_PAUSE);
+                handler.postDelayed(timerStop,mins[index]*60_000L);
+                toast("Música vai parar em "+times[index]);
+            }).show();
+    }
     private void checkPermission(){
         String permission=Build.VERSION.SDK_INT>=33?Manifest.permission.READ_MEDIA_AUDIO:Manifest.permission.READ_EXTERNAL_STORAGE;
         if(checkSelfPermission(permission)==PackageManager.PERMISSION_GRANTED)loadTracks();
@@ -679,6 +903,21 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
+        if(request==101 && result==RESULT_OK && data!=null && data.getData()!=null){
+            final String songUri=MusicService.currentUri;
+            Uri uri=data.getData();
+            worker.execute(()->{
+                try(InputStream input=getContentResolver().openInputStream(uri)){
+                    if(input==null)return;
+                    ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+                    byte[] buffer=new byte[4096];int read;
+                    while((read=input.read(buffer))!=-1 && bytes.size()<250000)bytes.write(buffer,0,read);
+                    String lyric=bytes.toString("UTF-8");
+                    getSharedPreferences("merlin_lyrics",0).edit().putString(songUri,lyric).apply();
+                    handler.post(()->toast("Letra importada"));
+                }catch(Exception e){handler.post(()->toast("Não consegui importar esta letra"));}
+            });return;
+        }
         if(request!=99||result!=RESULT_OK||data==null)return;
         ArrayList<Uri> uris=new ArrayList<>();
         if(data.getClipData()!=null){

@@ -1,4 +1,4 @@
-name: Merlin 1.3 - APK publico
+name: Merlin 1.4 - APK publico
 
 on:
   push:
@@ -30,6 +30,9 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
       - name: Compilar Merlin
+        env:
+          MERLIN_FIREBASE_API_KEY: ${{ vars.MERLIN_FIREBASE_API_KEY }}
+          MERLIN_FIREBASE_DATABASE_URL: ${{ vars.MERLIN_FIREBASE_DATABASE_URL }}
         run: gradle -p Merlin --no-daemon assembleDebug
       - name: Publicar APK para download direto
         env:
@@ -37,9 +40,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cp Merlin/app/build/outputs/apk/debug/app-debug.apk Merlin.apk
-          TAG=merlin-v1.3.0
+          TAG=merlin-v1.4.0
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" Merlin.apk --clobber
           else
-            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.3 - tocador musical" --notes "Merlin: player Android offline com playlists, busca, capas, recentes e importacao de musicas."
+            gh release create "$TAG" Merlin.apk --target merlin --title "Merlin 1.4 - tocador musical" --notes "Merlin 1.4: playlists pessoais, colaborativas, Match com até 10 amigos, convites e sincronização Firebase quando configurada. Sem variáveis, modo local."
           fi

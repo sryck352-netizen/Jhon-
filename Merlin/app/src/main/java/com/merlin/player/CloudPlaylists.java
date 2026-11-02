@@ -343,6 +343,13 @@ public final class CloudPlaylists {
             return true;
         },callback);
     }
+    public void revokeTastes(String roomId,Done<Boolean> callback){
+        run(()->{
+            auth();
+            delete("rooms/"+roomId+"/tastes/"+uid);
+            return true;
+        },callback);
+    }
     public static List<JSONObject> recommendations(Room room,int max){
         class Candidate {
             String hash,title,artist;

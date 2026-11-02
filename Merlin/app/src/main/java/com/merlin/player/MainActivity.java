@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Iterator;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URLEncoder;
@@ -806,9 +807,11 @@ public class MainActivity extends Activity {
             "Examinar automaticamente a biblioteca local",
             "Importar músicas baixadas",
             "Abrir configurações de áudio do Android",
-            "Privacidade: dados locais, nenhuma conta necessária"
+            "Privacidade: dados locais, nenhuma conta necessária",
+            "Exportar backup da biblioteca",
+            "Restaurar backup da biblioteca"
         };
-        boolean[] checked={offline,autoload,false,false,false};
+        boolean[] checked={offline,autoload,false,false,false,false,false};
         new AlertDialog.Builder(this).setTitle("Configurações do Merlin")
             .setMultiChoiceItems(options,checked,(d,index,checkedNow)->{
                 if(index==0){pref.edit().putBoolean("offline_only",checkedNow).apply();scheduleOnlineSearch();renderTracks();}
@@ -818,6 +821,8 @@ public class MainActivity extends Activity {
                     try{startActivity(new Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL));}
                     catch(Exception e){toast("Seu Android não disponibilizou um equalizador");}
                 }
+                if(index==5)exportBackup();
+                if(index==6)importBackup();
             })
             .setPositiveButton("Concluído",null).show();
     }
@@ -1431,6 +1436,76 @@ public class MainActivity extends Activity {
                 toast("Música vai parar em "+times[index]);
             }).show();
     }
+
+    private void exportBackup(){
+        Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE,"Merlin-Backup.json");
+        startActivityForResult(intent,150);
+    }
+    private void importBackup(){
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        startActivityForResult(intent,151);
+    }
+    private void writeBackup(Uri dest){
+        worker.execute(()->{
+            try{
+                android.content.SharedPreferences p=getSharedPreferences("merlin_library",0);
+                JSONObject root=new JSONObject().put("format","merlin-library-backup")
+                    .put("version",1).put("playlists",new JSONObject(p.getString("playlists","{}")))
+                    .put("imports",new JSONArray(p.getString("imports","[]")))
+                    .put("online_library",new JSONArray(p.getString("online_library","[]")))
+                    .put("recent_sequence",p.getString("recent_sequence",""));
+                JSONArray liked=new JSONArray();
+                for(String uri:AudioLibrary.favorites(this))liked.put(uri);
+                root.put("favorites",liked);
+                try(java.io.OutputStream out=getContentResolver().openOutputStream(dest,"w")){
+                    if(out==null)throw new Exception("Arquivo indisponível");
+                    out.write(root.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                handler.post(()->toast("Backup da biblioteca salvo"));
+            }catch(Exception e){handler.post(()->toast("Erro ao exportar: "+e.getMessage()));}
+        });
+    }
+    private void readBackup(Uri source){
+        worker.execute(()->{
+            try(java.io.InputStream in=getContentResolver().openInputStream(source)){
+                if(in==null)throw new Exception("Arquivo indisponível");
+                ByteArrayOutputStream buffer=new ByteArrayOutputStream();
+                byte[] chunk=new byte[4096];int n;
+                while((n=in.read(chunk))!=-1){
+                    buffer.write(chunk,0,n);
+                    if(buffer.size()>1_500_000)throw new Exception("Backup maior que o esperado.");
+                }
+                JSONObject root=new JSONObject(buffer.toString("UTF-8"));
+                if(!"merlin-library-backup".equals(root.optString("format"))||root.optInt("version")!=1)
+                    throw new Exception("Esse arquivo não é um backup válido do Merlin.");
+                // Validar ANTES de modificar as preferências.
+                JSONObject playlists=root.getJSONObject("playlists");
+                JSONArray imports=root.getJSONArray("imports");
+                JSONArray remote=root.getJSONArray("online_library");
+                JSONArray favorites=root.getJSONArray("favorites");
+                String recent=root.optString("recent_sequence","");
+                HashSet<String> liked=new HashSet<>();
+                for(int i=0;i<favorites.length();i++){
+                    String uri=favorites.getString(i);
+                    if(uri.length()<=2048)liked.add(uri);
+                }
+                android.content.SharedPreferences.Editor edit=getSharedPreferences("merlin_library",0).edit();
+                edit.putString("playlists",playlists.toString());
+                edit.putString("imports",imports.toString());
+                edit.putString("online_library",remote.toString());
+                edit.putString("recent_sequence",recent);
+                edit.putStringSet("favorites",liked);
+                if(!edit.commit())throw new Exception("Falha ao salvar dados restaurados.");
+                handler.post(()->{loadTracks();toast("Favoritos e playlists restaurados");});
+            }catch(Exception e){handler.post(()->toast("Erro na restauração: "+e.getMessage()));}
+        });
+    }
+
     private void checkPermission(){
         String permission=Build.VERSION.SDK_INT>=33?Manifest.permission.READ_MEDIA_AUDIO:Manifest.permission.READ_EXTERNAL_STORAGE;
         if(checkSelfPermission(permission)==PackageManager.PERMISSION_GRANTED)loadTracks();
@@ -1450,6 +1525,17 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
+        if(request==150&&result==RESULT_OK&&data!=null&&data.getData()!=null){
+            writeBackup(data.getData());return;
+        }
+        if(request==151&&result==RESULT_OK&&data!=null&&data.getData()!=null){
+            Uri backupUri=data.getData();
+            new AlertDialog.Builder(this).setTitle("Restaurar backup?")
+                .setMessage("Esta ação substitui seus favoritos e playlists atuais. Importe novamente os arquivos se o Android perder o acesso após uma reinstalação.")
+                .setPositiveButton("Restaurar",(d,w)->readBackup(backupUri))
+                .setNegativeButton("Cancelar",null).show();
+            return;
+        }
         if(request==101 && result==RESULT_OK && data!=null && data.getData()!=null){
             final String songUri=MusicService.currentUri;
             Uri uri=data.getData();

@@ -450,7 +450,7 @@ public class MainActivity extends Activity {
         LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);
         names.setPadding(dp(12),0,dp(4),0);
         miniTitle=text("Nada tocando",14,TEXT,true);miniTitle.setSingleLine(true);miniTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        miniArtist=text("Escolha uma música",11,MUTED,false);miniArtist.setSingleLine(true);
+        miniArtist=text("Escolha uma música para ouvir",11,MUTED,false);miniArtist.setSingleLine(true);
         names.addView(miniTitle);names.addView(miniArtist);
         bar.addView(names,new LinearLayout.LayoutParams(0,-2,1));
         names.setOnClickListener(v->showPlayer());
@@ -916,12 +916,58 @@ public class MainActivity extends Activity {
 
     // O menu Criar tem 3 caminhos reais, não é apenas visual.
     private void openCreateMenu(){
-        String[] options={"Playlist pessoal","Playlist colaborativa","Match musical (até 10 amigos)"};
-        new AlertDialog.Builder(this).setTitle("Criar no Merlin")
-            .setItems(options,(dialog,which)->{
-                if(which==0)createPlaylist();
-                else createCloudDialog(which==1?CloudPlaylists.COLLAB:CloudPlaylists.MATCH);
-            }).setNegativeButton("Cancelar",null).show();
+        final Dialog sheet=new Dialog(this);
+        LinearLayout frame=new LinearLayout(this);
+        frame.setOrientation(LinearLayout.VERTICAL);
+        frame.setPadding(dp(22),dp(21),dp(22),dp(30));
+        frame.setBackground(round(0xFF24202D,23));
+        TextView title=text("Criar no Merlin",24,TEXT,true);
+        frame.addView(title,margins(0,0,0,6,-1,40));
+        frame.addView(text("Escolha o que deseja criar",13,MUTED,false),
+            margins(0,0,0,15,-1,27));
+        createSheetOption(frame,"♫","Playlist pessoal",
+            "Suas músicas, organizadas do seu jeito.",()->{
+                sheet.dismiss();createPlaylist();
+            });
+        createSheetOption(frame,"♧","Playlist colaborativa",
+            "Monte uma playlist com seus amigos.",()->{
+                sheet.dismiss();createCloudDialog(CloudPlaylists.COLLAB);
+            });
+        createSheetOption(frame,"✧","Match musical",
+            "Até 10 amigos e recomendações para todos.",()->{
+                sheet.dismiss();createCloudDialog(CloudPlaylists.MATCH);
+            });
+        sheet.setContentView(frame);
+        sheet.show();
+        Window window=sheet.getWindow();
+        if(window!=null){
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.setLayout(-1,-2);
+            window.setGravity(Gravity.BOTTOM);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams params=window.getAttributes();
+            params.dimAmount=0.58f;window.setAttributes(params);
+        }
+    }
+    private void createSheetOption(LinearLayout frame,String symbol,String name,String detail,Runnable click){
+        LinearLayout item=new LinearLayout(this);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(12),dp(8),dp(10),dp(8));
+        item.setBackground(round(0xFF34303C,12));
+        TextView glyph=text(symbol,26,PURPLE,true);
+        glyph.setGravity(Gravity.CENTER);
+        glyph.setBackground(round(0xFF47345C,10));
+        item.addView(glyph,lp(54,54));
+        LinearLayout body=new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(13),0,dp(4),0);
+        TextView heading=text(name,16,TEXT,true);body.addView(heading);
+        TextView sub=text(detail,12,MUTED,false);
+        sub.setMaxLines(2);body.addView(sub);
+        item.addView(body,new LinearLayout.LayoutParams(0,-2,1));
+        item.addView(text("›",27,MUTED,false),lp(18,40));
+        frame.addView(item,margins(0,0,0,9,-1,75));
+        item.setOnClickListener(v->click.run());
     }
     private void localPlaylistMenu(String name){
         new AlertDialog.Builder(this).setTitle(name)
@@ -1574,7 +1620,9 @@ public class MainActivity extends Activity {
     }
     private void pickAudio(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        i.setType("audio/*");i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"audio/*","video/mp4"});
+        i.addCategory(Intent.CATEGORY_OPENABLE);
         i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(i,99);

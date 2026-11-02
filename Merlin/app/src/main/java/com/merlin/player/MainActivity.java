@@ -79,6 +79,7 @@ public class MainActivity extends Activity {
     private LinearLayout activeRoomContent;
     private String activeRoomId="";
     private Runnable roomPoll;
+    private Runnable matchUpdateRunnable;
     private CloudPlaylists.Subscription activeSubscription;
     private String lastShownPlaybackError="";
 
@@ -407,6 +408,7 @@ public class MainActivity extends Activity {
             recent.append("\n").append(uri);
         }
         getSharedPreferences("merlin_library",0).edit().putString("recent_sequence",recent.toString()).apply();
+        scheduleMatchUpdates();
     }
 
     private void buildMini(LinearLayout root) {
@@ -671,6 +673,7 @@ public class MainActivity extends Activity {
         row.setOnLongClickListener(v->{
             AudioLibrary.rememberOnline(this,song);
             AudioLibrary.toggleFavorite(this,song.uri);
+            scheduleMatchUpdates();
             toast("Faixa salva nos favoritos; toque para reproduzir");
             loadTracks();return true;
         });
@@ -1187,18 +1190,70 @@ public class MainActivity extends Activity {
                 });
             }).setNegativeButton("Cancelar",null).show();
     }
-    private void confirmTasteSharing(String roomId){
+
+    private ArrayList<Track> selectedMatchTastes(String roomId){
+        android.content.SharedPreferences consent=getSharedPreferences("merlin_match_consent",0);
         HashSet<String> liked=AudioLibrary.favorites(this);
-        ArrayList<Track> favorites=new ArrayList<>();
-        for(Track track:tracks)if(liked.contains(track.uri))favorites.add(track);
-        if(favorites.isEmpty()){toast("Curta algumas músicas antes de compartilhar seus gostos");return;}
-        int quantity=Math.min(50,favorites.size());
-        new AlertDialog.Builder(this).setTitle("Compartilhar seus gostos?")
-            .setMessage("Os títulos e artistas de até "+quantity+" músicas curtidas serão visíveis aos participantes deste Match. Nenhum arquivo ou histórico privado será enviado. Você pode atualizar sua seleção depois.")
-            .setPositiveButton("Compartilhar",(d,w)->cloud.publishTastes(roomId,favorites,(ok,error)->{
-                if(error!=null){showCloudError(error);return;}
-                toast("Seus gostos foram compartilhados");loadCloudRoom(roomId,false);
-            })).setNegativeButton("Cancelar",null).show();
+        ArrayList<Track> selected=new ArrayList<>();
+        HashSet<String> used=new HashSet<>();
+        for(Track t:tracks)if(liked.contains(t.uri)&&used.add(t.title.toLowerCase(Locale.ROOT)+"|"+t.artist.toLowerCase(Locale.ROOT)))selected.add(t);
+        if(consent.getBoolean("history_"+roomId,false)){
+            for(Track t:getRecent()){
+                if(used.add(t.title.toLowerCase(Locale.ROOT)+"|"+t.artist.toLowerCase(Locale.ROOT)))selected.add(t);
+            }
+        }
+        if(selected.size()>50)return new ArrayList<>(selected.subList(0,50));
+        return selected;
+    }
+    private void refreshMatch(String roomId,boolean notify){
+        ArrayList<Track> selected=selectedMatchTastes(roomId);
+        cloud.publishTastes(roomId,selected,(ok,error)->{
+            if(error!=null){if(notify)showCloudError(error);return;}
+            cloud.saveMatch(roomId,(count,error2)->{
+                if(error2!=null){if(notify)showCloudError(error2);return;}
+                if(notify)toast("Match atualizado • "+count+" sugestões");
+                if(roomId.equals(activeRoomId))loadCloudRoom(roomId,false);
+                loadCloudRooms();
+            });
+        });
+    }
+    private void scheduleMatchUpdates(){
+        if(cloud==null||!cloud.configured())return;
+        if(matchUpdateRunnable!=null)handler.removeCallbacks(matchUpdateRunnable);
+        matchUpdateRunnable=()->{
+            android.content.SharedPreferences consent=getSharedPreferences("merlin_match_consent",0);
+            for(CloudPlaylists.Room room:cloudRooms){
+                if(CloudPlaylists.MATCH.equals(room.kind)&&consent.getBoolean("enabled_"+room.id,false))
+                    refreshMatch(room.id,false);
+            }
+        };
+        handler.postDelayed(matchUpdateRunnable,2600);
+    }
+    private void confirmTasteSharing(String roomId){
+        android.content.SharedPreferences pref=getSharedPreferences("merlin_match_consent",0);
+        final boolean[] includeHistory={pref.getBoolean("history_"+roomId,false)};
+        new AlertDialog.Builder(this).setTitle("Permissões do Match")
+            .setMessage("O grupo verá apenas títulos e artistas das suas músicas escolhidas. Você pode parar de compartilhar quando quiser.")
+            .setMultiChoiceItems(new String[]{"Incluir minhas 20 músicas recentes (opcional)"},
+                new boolean[]{includeHistory[0]},(dialog,which,checked)->includeHistory[0]=checked)
+            .setPositiveButton("Compartilhar e atualizar",(d,w)->{
+                pref.edit().putBoolean("enabled_"+roomId,true)
+                    .putBoolean("history_"+roomId,includeHistory[0]).apply();
+                if(selectedMatchTastes(roomId).isEmpty()){
+                    pref.edit().putBoolean("enabled_"+roomId,false).apply();
+                    toast("Curta músicas ou autorize seus recentes");return;
+                }
+                refreshMatch(roomId,true);
+            }).setNeutralButton("Revogar acesso",(d,w)->{
+                pref.edit().putBoolean("enabled_"+roomId,false).putBoolean("history_"+roomId,false).apply();
+                cloud.revokeTastes(roomId,(success,error)->{
+                    if(error!=null){showCloudError(error);return;}
+                    cloud.saveMatch(roomId,(count,failure)->{
+                        if(failure!=null)showCloudError(failure);
+                        else {toast("Gostos removidos deste Match");loadCloudRoom(roomId,false);}
+                    });
+                });
+            }).setNegativeButton("Cancelar",null).show();
     }
 
     private void playSelection(Track track){
@@ -1266,7 +1321,7 @@ public class MainActivity extends Activity {
         titleRow.addView(nameBox,new LinearLayout.LayoutParams(0,-2,1));
         TextView fav=text(AudioLibrary.favorites(this).contains(MusicService.currentUri)?"♥":"♡",30,PURPLE,true);
         titleRow.addView(fav,lp(40,50));
-        fav.setOnClickListener(v->{boolean selected=AudioLibrary.toggleFavorite(this,MusicService.currentUri);fav.setText(selected?"♥":"♡");renderTracks();});
+        fav.setOnClickListener(v->{boolean selected=AudioLibrary.toggleFavorite(this,MusicService.currentUri);fav.setText(selected?"♥":"♡");scheduleMatchUpdates();renderTracks();});
         root.addView(titleRow);
         SeekBar seekBar=new SeekBar(this);seekBar.setMax(Math.max(1,MusicService.durationMs));
         seekBar.setProgress(MusicService.positionMs);

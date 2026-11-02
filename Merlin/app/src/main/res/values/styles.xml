@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="MerlinTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#B47BFF</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#111014</item>
+        <item name="android:navigationBarColor">#111014</item>
+        <item name="android:windowBackground">#111014</item>
+        <item name="android:alertDialogTheme">@style/MerlinAlert</item>
+    </style>
+    <style name="MerlinAlert" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#B47BFF</item>
+        <item name="android:windowBackground">#24202D</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#C4BFCD</item>
+    </style>
+</resources>

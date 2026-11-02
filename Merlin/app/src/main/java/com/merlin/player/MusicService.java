@@ -38,6 +38,7 @@ public class MusicService extends Service {
     public static volatile boolean shuffle = false;
     public static volatile int repeat = 0; // 0=off, 1=all, 2=one
     public static volatile int index = -1;
+    public static volatile String playbackError = "";
 
     private static final String CHANNEL_ID = "merlin_playback";
     private static final int NOTIFICATION_ID = 101;
@@ -96,12 +97,18 @@ public class MusicService extends Service {
         currentTitle=track.title; currentArtist=track.artist; currentUri=track.uri;
         durationMs=(int)Math.min(Integer.MAX_VALUE,track.duration); positionMs=0;
         playing=false;
+        playbackError = "";
         try {
             mediaPlayer=new MediaPlayer();
             mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
-            mediaPlayer.setDataSource(this, android.net.Uri.parse(track.uri));
+            if(AudiusCatalog.canPlay(track)){
+                // Http(s) streaming autorizado, sem navegador ou links externos.
+                mediaPlayer.setDataSource(track.uri);
+            }else{
+                mediaPlayer.setDataSource(this, android.net.Uri.parse(track.uri));
+            }
             mediaPlayer.setOnPreparedListener(mp -> {
                 isReady=true;
                 durationMs=mp.getDuration();
@@ -111,6 +118,7 @@ public class MusicService extends Service {
             });
             mediaPlayer.setOnCompletionListener(mp -> next(true));
             mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                playbackError="Não foi possível reproduzir esta faixa. Verifique sua conexão ou tente outra música.";
                 playing=false; isReady=false; notifyAndBroadcast();
                 return true;
             });
@@ -120,6 +128,7 @@ public class MusicService extends Service {
             mediaPlayer.prepareAsync();
             broadcast();
         } catch (Exception ex) {
+            playbackError="Erro ao abrir música: "+ex.getClass().getSimpleName();
             disposePlayer();
             playing=false;
             notifyAndBroadcast();

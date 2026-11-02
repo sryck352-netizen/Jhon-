@@ -79,6 +79,9 @@ public class MainActivity extends Activity {
     private LinearLayout activeRoomContent;
     private String activeRoomId="";
     private Runnable roomPoll;
+    private CloudPlaylists.Subscription activeSubscription;
+    private String lastShownPlaybackError="";
+
 
     private List<OnlineCatalog.Song> onlineResults = new ArrayList<>();
     private List<Track> audiusResults = new ArrayList<>();
@@ -132,10 +135,12 @@ public class MainActivity extends Activity {
         updateMini();
         if(cloud!=null&&cloud.configured())loadCloudRooms();
         if(roomPoll!=null&&activeRoomDialog!=null&&activeRoomDialog.isShowing())handler.postDelayed(roomPoll,1000);
+        if(activeRoomDialog!=null&&activeRoomDialog.isShowing()&&activeSubscription==null)startRealtimeRoom(activeRoomId);
     }
     @Override protected void onStop() {
         try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}
         if(roomPoll!=null)handler.removeCallbacks(roomPoll);
+        if(activeSubscription!=null){activeSubscription.cancel();activeSubscription=null;}
         super.onStop();
     }
 
@@ -145,6 +150,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onDestroy(){
         if(roomPoll!=null)handler.removeCallbacks(roomPoll);
+        if(activeSubscription!=null){activeSubscription.cancel();activeSubscription=null;}
         if(cloud!=null)cloud.close();
         super.onDestroy();
     }
@@ -678,6 +684,9 @@ public class MainActivity extends Activity {
         for(int i=0;i<queue.size();i++)if(queue.get(i).uri.equals(chosen.uri)){selected=i;break;}
         if(selected<0){queue.add(0,chosen);selected=0;}
         AudioLibrary.rememberOnline(this,chosen);
+        boolean known=false;
+        for(Track t:tracks)if(t.uri.equals(chosen.uri)){known=true;break;}
+        if(!known)tracks.add(chosen);
         remember(chosen);
         AudioLibrary.saveQueue(this,queue);
         Intent intent=new Intent(this,MusicService.class).setAction(MusicService.ACTION_PLAY);
@@ -1001,12 +1010,14 @@ public class MainActivity extends Activity {
         dialog.setOnDismissListener(d->{
             if(activeRoomDialog==dialog){
                 if(roomPoll!=null)handler.removeCallbacks(roomPoll);
+                if(activeSubscription!=null){activeSubscription.cancel();activeSubscription=null;}
                 activeRoomDialog=null;activeRoomContent=null;activeRoomId="";
             }
         });
         dialog.show();
         if(dialog.getWindow()!=null)dialog.getWindow().setLayout(-1,-1);
         drawCloudRoom(room);
+        startRealtimeRoom(room.id);
         roomPoll=new Runnable(){
             @Override public void run(){
                 if(!dialog.isShowing()||!room.id.equals(activeRoomId))return;
@@ -1015,6 +1026,14 @@ public class MainActivity extends Activity {
             }
         };
         handler.postDelayed(roomPoll,8500);
+    }
+    private void startRealtimeRoom(String roomId){
+        if(cloud==null||!cloud.configured()||roomId==null||roomId.isEmpty())return;
+        if(activeSubscription!=null){activeSubscription.cancel();activeSubscription=null;}
+        activeSubscription=cloud.listen(roomId,(changed,error)->{
+            if(changed&&roomId.equals(activeRoomId)&&activeRoomDialog!=null&&activeRoomDialog.isShowing())
+                loadCloudRoom(roomId,false);
+        });
     }
     private void drawCloudRoom(CloudPlaylists.Room room){
         if(activeRoomContent==null||activeRoomDialog==null||!activeRoomDialog.isShowing())return;
@@ -1208,6 +1227,10 @@ public class MainActivity extends Activity {
         miniTitle.setText(active?MusicService.currentTitle:"Nada tocando");
         miniArtist.setText(active?MusicService.currentArtist:"Escolha uma música");
         miniPlay.setText(MusicService.playing?"❚❚":"▶");
+        if(!MusicService.playbackError.isEmpty()&&!MusicService.playbackError.equals(lastShownPlaybackError)){
+            lastShownPlaybackError=MusicService.playbackError;
+            toast(lastShownPlaybackError);
+        }
         if(miniSeek!=null && !miniSeek.isPressed()){
             miniSeek.setMax(Math.max(1,MusicService.durationMs));
             miniSeek.setProgress(Math.max(0,MusicService.positionMs));

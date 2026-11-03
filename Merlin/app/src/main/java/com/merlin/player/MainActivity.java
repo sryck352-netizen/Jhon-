@@ -1691,7 +1691,10 @@ public class MainActivity extends Activity {
         Intent create=new Intent(Intent.ACTION_CREATE_DOCUMENT);
         create.addCategory(Intent.CATEGORY_OPENABLE);
         create.setType(kind.equals("video")?"video/*":"audio/*");
-        create.putExtra(Intent.EXTRA_TITLE,MediaDownload.suggestedFileName(address));
+        String filename=MediaDownload.suggestedFileName(address);
+        if(filename.equals("merlin_midia.mp3"))
+            filename=kind.equals("video")?"merlin_video.mp4":"merlin_audio.mp3";
+        create.putExtra(Intent.EXTRA_TITLE,filename);
         try{startActivityForResult(create,203);}
         catch(Exception e){toast("Não foi possível abrir o seletor de arquivos.");}
     }
@@ -1770,10 +1773,11 @@ public class MainActivity extends Activity {
             }
             Uri target=data.getData();
             String from=pendingDownloadAddress;
+            String format=pendingDownloadFormat;
             pendingDownloadAddress="";pendingDownloadFormat="";
             if(from.isEmpty())return;
             toast("Download iniciado. O Merlin avisará quando terminar.");
-            MediaDownload.save(getApplicationContext(),from,target,(success,message)->{
+            MediaDownload.save(getApplicationContext(),from,format,target,(success,message)->{
                 if(success){
                     try{getContentResolver().takePersistableUriPermission(
                         target,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}

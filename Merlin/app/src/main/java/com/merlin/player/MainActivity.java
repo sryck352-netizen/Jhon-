@@ -176,10 +176,12 @@ public class MainActivity extends Activity {
         headerRoot.setPadding(dp(18),dp(11),dp(18),dp(5));
         LinearLayout top=new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView badge=text("M",19,0xFFF4F0FF,true);
-        badge.setGravity(Gravity.CENTER);
+        ImageView badge=new ImageView(this);
+        badge.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        badge.setImageResource(R.drawable.merlin_icon);
         badge.setBackground(round(0xFF69469C,99));
-        top.addView(badge,lp(40,40));
+        badge.setClipToOutline(true);
+        top.addView(badge,lp(42,42));
         badge.setOnClickListener(v->openProfile());
         headerTitle=text("Merlin",23,TEXT,true);
         headerTitle.setPadding(dp(13),0,0,0);

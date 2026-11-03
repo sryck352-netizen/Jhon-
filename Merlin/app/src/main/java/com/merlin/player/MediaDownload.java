@@ -66,7 +66,7 @@ public final class MediaDownload {
         }catch(Exception ignored){}
         return "merlin_midia.mp3";
     }
-    public static void save(Context ctx,String source,Uri destination,Callback callback){
+    public static void save(Context ctx,String source,String format,Uri destination,Callback callback){
         if(!isValid(source)){
             callback.done(false,"Use uma URL HTTPS direta de arquivo autorizado.");
             return;
@@ -95,9 +95,13 @@ public final class MediaDownload {
                     type=type==null?"":type.toLowerCase(Locale.ROOT).split(";")[0].trim();
                     boolean isAudio=type.startsWith("audio/");
                     boolean isVideo=type.startsWith("video/");
+                    if((isAudio&&!"audio".equals(format))||(isVideo&&!"video".equals(format)))
+                        throw new IllegalArgumentException("O arquivo não corresponde ao formato escolhido.");
                     if(!isAudio&&!isVideo){
                         if(!type.equals("application/octet-stream")||!hasFileSuffix(current.toString()))
                             throw new IllegalArgumentException("O endereço não forneceu áudio ou vídeo direto.");
+                        if(!format.equals(format(current.toString())))
+                            throw new IllegalArgumentException("O arquivo não corresponde ao formato escolhido.");
                     }
                     long size=conn.getContentLengthLong();
                     if(size>MAX_BYTES)throw new IllegalArgumentException("Arquivo maior que 1 GB.");

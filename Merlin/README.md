@@ -1,3 +1,18 @@
+# Merlin 1.7 — arquivos originais e downloads permitidos
+
+## Inclusões desta versão
+- **Biblioteca > Importar:** selecionar músicas e vídeos (MP3, AAC, FLAC, M4A, OGG, WAV, MP4 etc.) já baixados no Snaptube ou salvos no telefone.
+- **Biblioteca > Baixar áudio/vídeo autorizado:** colar endereço **HTTPS direto do arquivo**. O Android abre um seletor para escolher onde salvar sem acesso irrestrito ao armazenamento. O tipo recebido é conferido e o arquivo é importado para a biblioteca quando o download termina.
+- **Compartilhamento:** o código já contém um importador que copia mídia recebida para armazenamento privado, protegendo acesso futuro. Porém o registro do Merlin no menu Compartilhar de outros aplicativos ainda precisa ser configurado no AndroidManifest e validado; **não considere o compartilhamento direto disponível nesta compilação**.
+- Preferências, curtidas, playlists pessoais, Match, reprodução local e integrações existentes permanecem sem migração de banco de dados.
+
+## O que este recurso NÃO faz
+- Não conecta ao catálogo interno do Snaptube nem baixa do YouTube. Não converte links de páginas ou extrai faixas de vídeo, não ignora DRM ou anúncios de terceiros.
+- O usuário deve possuir autorização para baixar o arquivo indicado e escolher o destino no seletor Android.
+- A autorização de leitura ampla da biblioteca pode ser negada; a importação manual usa o seletor do sistema e continua disponível.
+
+## Build
+Java 17, Android SDK 35, Gradle 8.10.2.
 # MERLIN — Player Android (versão 1.6.1)
 
 O Merlin permanece no projeto Android Java original. Os dados existentes ficam nas mesmas chaves de SharedPreferences e o applicationId continua **com.merlin.player**.

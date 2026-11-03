@@ -76,6 +76,8 @@ public class MainActivity extends Activity {
     private String miniCoverUri="";
     private SeekBar miniSeek;
     private String search = "", filter = "Todas";
+    private String pendingDownloadAddress="";
+    private String pendingDownloadFormat="";
     private Dialog playerDialog;
     private CloudPlaylists cloud;
     private List<CloudPlaylists.Room> cloudRooms = new ArrayList<>();
@@ -127,7 +129,10 @@ public class MainActivity extends Activity {
         cloud=new CloudPlaylists(this);
         buildUI();
         checkPermission();
-        handler.post(()->handleJoinIntent(getIntent()));
+        handler.post(()->{
+            handleJoinIntent(getIntent());
+            handleIncomingShare(getIntent());
+        });
         handler.post(new Runnable(){
             @Override public void run(){updateMini();handler.postDelayed(this,700);}
         });
@@ -151,7 +156,7 @@ public class MainActivity extends Activity {
 
 
     @Override protected void onNewIntent(Intent intent){
-        super.onNewIntent(intent);setIntent(intent);handleJoinIntent(intent);
+        super.onNewIntent(intent);setIntent(intent);handleJoinIntent(intent);handleIncomingShare(intent);
     }
     @Override protected void onDestroy(){
         if(roomPoll!=null)handler.removeCallbacks(roomPoll);
@@ -646,9 +651,12 @@ public class MainActivity extends Activity {
             header.addView(section("Sua biblioteca"),new LinearLayout.LayoutParams(0,-2,1));
             TextView importButton=text("⇩  Importar",13,PURPLE,true);
             importButton.setGravity(Gravity.CENTER);
-            importButton.setOnClickListener(v->pickAudio());
+            importButton.setOnClickListener(v->showMediaActions());
             header.addView(importButton,lp(102,46));
             songsContainer.addView(header);
+            TextView mediaTools=action("⇩  Baixar áudio/vídeo autorizado ou importar do Snaptube",13,false);
+            mediaTools.setOnClickListener(v->showMediaActions());
+            songsContainer.addView(mediaTools,margins(0,2,0,9,-1,48));
             HorizontalScrollView tabs=new HorizontalScrollView(this);
             tabs.setHorizontalScrollBarEnabled(false);
             playlistBar=new LinearLayout(this);
@@ -665,6 +673,7 @@ public class MainActivity extends Activity {
         // Importação disponível mesmo com biblioteca vazia.
         if(tracks.isEmpty()){
             TextView importer=chip("＋  Importar músicas do Snaptube ou do celular",true,()->pickAudio());
+            importer.setOnClickListener(v->showMediaActions());
             songsContainer.addView(importer,margins(0,10,0,12,-1,51));
         }
     }
@@ -1638,6 +1647,112 @@ public class MainActivity extends Activity {
         if(req==42) { if(grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED)loadTracks();
             else {toast("Você pode importar músicas manualmente");loadTracks();} }
     }
+
+    private void showMediaActions(){
+        new AlertDialog.Builder(this).setTitle("Músicas e vídeos")
+            .setItems(new String[]{
+                "Importar arquivos do Snaptube ou do celular",
+                "Baixar áudio por link direto autorizado",
+                "Baixar vídeo por link direto autorizado"
+            },(d,index)->{
+                if(index==0)pickAudio();
+                else showDirectDownloadDialog(index==1?"audio":"video");
+            })
+            .setNegativeButton("Cancelar",null).show();
+    }
+    private void showDirectDownloadDialog(String kind){
+        EditText url=new EditText(this);
+        url.setTextColor(TEXT);url.setHintTextColor(MUTED);
+        url.setSingleLine(false);url.setMinLines(2);
+        url.setHint("https://exemplo.com/arquivo."+(kind.equals("audio")?"mp3":"mp4"));
+        LinearLayout area=new LinearLayout(this);
+        area.setOrientation(LinearLayout.VERTICAL);
+        area.setPadding(dp(18),dp(10),dp(18),0);
+        area.addView(url);
+        TextView notice=text(
+            "Use apenas o link HTTPS direto de um arquivo de áudio/vídeo que você tem autorização para baixar. Links de páginas do YouTube e de outros serviços protegidos não funcionam.",
+            12,MUTED,false);
+        area.addView(notice,margins(0,12,0,0,-1,-2));
+        new AlertDialog.Builder(this).setTitle(kind.equals("audio")?
+            "Baixar áudio no Merlin":"Baixar vídeo no Merlin")
+            .setView(area)
+            .setPositiveButton("Escolher onde salvar",(d,w)->{
+                startAuthorizedDownload(url.getText().toString().trim(),kind);
+            })
+            .setNegativeButton("Cancelar",null).show();
+    }
+    private void startAuthorizedDownload(String address,String kind){
+        if(!MediaDownload.isValid(address)){
+            toast("Informe um link HTTPS direto autorizado.");
+            return;
+        }
+        pendingDownloadAddress=address;
+        pendingDownloadFormat=kind;
+        Intent create=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        create.addCategory(Intent.CATEGORY_OPENABLE);
+        create.setType(kind.equals("video")?"video/*":"audio/*");
+        create.putExtra(Intent.EXTRA_TITLE,MediaDownload.suggestedFileName(address));
+        try{startActivityForResult(create,203);}
+        catch(Exception e){toast("Não foi possível abrir o seletor de arquivos.");}
+    }
+    private void handleIncomingShare(Intent intent){
+        if(intent==null)return;
+        String action=intent.getAction();
+        if(Intent.ACTION_SEND.equals(action)||Intent.ACTION_SEND_MULTIPLE.equals(action)){
+            ArrayList<Uri> received=new ArrayList<>();
+            if(Intent.ACTION_SEND.equals(action)){
+                Object shared=intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if(shared instanceof Uri)received.add((Uri)shared);
+            }else{
+                ArrayList<Uri> items=intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if(items!=null)received.addAll(items);
+            }
+            if(intent.getClipData()!=null){
+                for(int i=0;i<intent.getClipData().getItemCount();i++){
+                    Uri uri=intent.getClipData().getItemAt(i).getUri();
+                    if(uri!=null&&!received.contains(uri))received.add(uri);
+                }
+            }
+            if(!received.isEmpty()){
+                // O usuário selecionou "Compartilhar > Merlin" em outro aplicativo.
+                SharedMediaImport.save(getApplicationContext(),received,(count,error)->{
+                    if(count>0){toast(count+" arquivo(s) importado(s) no Merlin.");loadTracks();}
+                    else showCloudError("Não foi possível importar a mídia compartilhada. "+
+                        (error.isEmpty()?"Compartilhe o arquivo de áudio ou vídeo, não somente seu endereço.":error));
+                });
+                intent.setAction(null);
+                return;
+            }
+            String sharedText=intent.getStringExtra(Intent.EXTRA_TEXT);
+            if(sharedText!=null&&!sharedText.trim().isEmpty()){
+                String link=sharedText.trim();
+                intent.setAction(null);
+                if(MediaDownload.isValid(link)){
+                    new AlertDialog.Builder(this).setTitle("Link recebido")
+                        .setMessage("Baixar este arquivo autorizado no Merlin?\n\n"+link)
+                        .setPositiveButton("Baixar",(d,w)->startAuthorizedDownload(
+                            link,MediaDownload.format(link)))
+                        .setNegativeButton("Cancelar",null).show();
+                }else{
+                    new AlertDialog.Builder(this).setTitle("Compartilhar com o Merlin")
+                        .setMessage("O aplicativo recebeu um link, não um arquivo de mídia. No Snaptube, baixe o conteúdo que você pode usar e compartilhe o arquivo de áudio ou vídeo com o Merlin. Links do YouTube não podem ser convertidos diretamente aqui.")
+                        .setPositiveButton("Importar arquivo",(d,w)->pickAudio())
+                        .setNegativeButton("Fechar",null).show();
+                }
+            }
+        }else if(Intent.ACTION_VIEW.equals(action)&&intent.getData()!=null){
+            Uri shared=intent.getData();
+            if("content".equals(shared.getScheme())||"file".equals(shared.getScheme())){
+                ArrayList<Uri> one=new ArrayList<>();one.add(shared);
+                SharedMediaImport.save(getApplicationContext(),one,(count,error)->{
+                    if(count>0){toast("Mídia adicionada ao Merlin.");loadTracks();}
+                    else toast("Não foi possível importar este arquivo.");
+                });
+                intent.setAction(null);
+            }
+        }
+    }
+
     private void pickAudio(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.setType("*/*");
@@ -1649,6 +1764,28 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
+        if(request==203){
+            if(result!=RESULT_OK||data==null||data.getData()==null){
+                pendingDownloadAddress="";pendingDownloadFormat="";return;
+            }
+            Uri target=data.getData();
+            String from=pendingDownloadAddress;
+            pendingDownloadAddress="";pendingDownloadFormat="";
+            if(from.isEmpty())return;
+            toast("Download iniciado. O Merlin avisará quando terminar.");
+            MediaDownload.save(getApplicationContext(),from,target,(success,message)->{
+                if(success){
+                    try{getContentResolver().takePersistableUriPermission(
+                        target,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}
+                    catch(Exception ignored){}
+                    worker.execute(()->{
+                        AudioLibrary.addImport(getApplicationContext(),target);
+                        runOnUiThread(()->{toast(message);loadTracks();});
+                    });
+                }else showCloudError(message);
+            });
+            return;
+        }
         if(request==150&&result==RESULT_OK&&data!=null&&data.getData()!=null){
             writeBackup(data.getData());return;
         }
